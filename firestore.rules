@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// 청년부 출석 앱 보안 규칙
+// - 읽기: 로그인한 교인(보기·편집 계정)만
+// - 쓰기: 편집 계정(목자용)만
+// Firebase 콘솔 > Firestore > 규칙 탭에 게시된 내용과 같아요. 바꿀 때는 둘 다 고쳐 주세요.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.token.email == 'editor@youth.app';
+    }
+  }
+}
