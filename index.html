@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>청년부 출석</title>
+<meta name="theme-color" content="#1f5c3f">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-512.png">
+<link rel="icon" href="icon-512.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="청년부 출석">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light dark;
+--bg:light-dark(#ffffff,#0f1a15);--panel:light-dark(#f3f6f2,#17241d);--ink:light-dark(#14201a,#e9efe9);
+--mute:light-dark(#5b6b62,#9db0a4);--line:light-dark(#dfe6df,#26372d);
+--green:light-dark(#1f5c3f,#5fbf8a);--green2:light-dark(#cfe6d6,#24463a);--wheat:#e8a92a;--red:light-dark(#b3402a,#ff8a72);
+--onG:light-dark(#fff,#0f1a15)}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Noto Sans KR",system-ui,sans-serif;overflow-x:clip}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--wheat);outline-offset:2px}
+.top{position:sticky;top:0;z-index:5;background:var(--green);color:#fff;padding:calc(12px + env(safe-area-inset-top)) max(4vw,14px) 0}
+.top h1{margin:0;font-size:20px;font-weight:900;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.top h1 small{font-size:13px;font-weight:500;opacity:.85}
+.date{display:flex;align-items:center;gap:6px;margin:10px 0}
+.date button{width:44px;height:44px;border-radius:10px;border:0;background:rgb(255 255 255/.15);color:#fff;font-size:18px}
+.date input{flex:1;height:44px;border-radius:10px;border:0;padding:0 12px;background:#fff;color:#14201a;font-size:16px;font-weight:700}
+.tabs{display:flex;gap:4px}
+.tabs a{flex:1;text-align:center;padding:11px 4px;color:#fff;text-decoration:none;font-weight:700;border-radius:10px 10px 0 0;opacity:.8}
+.tabs a[aria-current=page]{background:var(--bg);color:var(--ink);opacity:1}
+main{max-width:860px;margin:0 auto;padding:18px max(4vw,14px) calc(60px + env(safe-area-inset-bottom))}
+.note{font-size:13px;color:var(--mute);margin:8px 0}
+.warn{background:light-dark(#fff4dd,#3a2e12);border-radius:10px;padding:10px 14px;font-size:14px;margin:0 0 14px}
+.tally{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;align-items:end;padding:18px;background:var(--panel);border-radius:16px}
+.big{font-size:clamp(56px,14vw,96px);font-weight:900;line-height:1;color:var(--green);letter-spacing:-.03em}
+.big span{font-size:.36em;color:var(--mute);font-weight:500;letter-spacing:0}
+.kpis{display:grid;gap:8px}
+.kpi{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding-bottom:6px;font-size:15px}
+.kpi b{font-size:20px;white-space:nowrap}
+.meter{grid-column:1/-1;height:12px;border-radius:6px;background:var(--green2);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--green);transition:width .5s}
+h2{font-size:18px;margin:26px 0 10px;font-weight:900}
+.rows{display:grid;gap:8px}
+.row{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.row>button{all:unset;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;width:100%;padding:14px 16px;cursor:pointer}
+.row>button:focus-visible{outline:3px solid var(--wheat)}
+.rname{font-weight:700}
+.rname small{font-weight:400;color:var(--mute);font-size:13px;margin-left:6px}
+.rnum{font-weight:900;font-size:20px;white-space:nowrap;text-align:right}
+.rnum small{font-size:13px;color:var(--mute);font-weight:500}
+.bar{grid-column:1/-1;height:8px;border-radius:4px;background:var(--green2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green)}
+.badge{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:20px;margin-left:6px;vertical-align:2px}
+.ok{background:var(--green2);color:var(--green)}.no{background:light-dark(#fbe3dc,#4a2219);color:var(--red)}
+.detail{padding:4px 16px 16px;border-top:1px dashed var(--line)}
+.detail h3{font-size:13px;color:var(--mute);margin:12px 0 6px;font-weight:500}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:4px 10px;border-radius:20px;background:var(--panel);font-size:14px}
+.chip.p{background:var(--green);color:var(--onG)}.chip.n{box-shadow:inset 0 0 0 2px var(--wheat)}
+.panel{background:var(--panel);border-radius:16px;padding:18px}
+.field{display:grid;gap:6px;margin-bottom:14px}
+.field label{font-size:14px;font-weight:700}
+input[type=text],input[type=password],input[type=number],textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg);font-size:16px}
+textarea{min-height:200px;resize:vertical}
+.btn{min-height:44px;padding:0 18px;border-radius:10px;border:0;background:var(--green);color:var(--onG);font-weight:700;font-size:16px}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.btn.danger{background:var(--red);color:#fff}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
+.btn:disabled{opacity:.5;cursor:default}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.gpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;margin-bottom:16px}
+.gp{min-height:48px;border-radius:12px;border:2px solid var(--line);background:var(--bg);font-weight:700;font-size:14px;padding:4px 6px;line-height:1.25}
+.gp[aria-pressed=true]{border-color:var(--green);background:var(--green);color:var(--onG)}
+.gp small{display:block;font-weight:500;font-size:11px;opacity:.8}
+.ghead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.ghead h2{margin:0}
+.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:12px 0}
+.m{display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 12px;border-radius:12px;border:2px solid var(--line);background:var(--bg);text-align:left;font-weight:700}
+.m .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;color:transparent}
+.m[aria-pressed=true]{border-color:var(--green);background:var(--green2)}
+.m[aria-pressed=true] .dot{background:var(--green);border-color:var(--green);color:var(--onG)}
+.m{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.m[aria-pressed=mixed]{border-color:var(--wheat);background:light-dark(#fff4dd,#3a2e12)}
+.m[aria-pressed=mixed] .dot{background:var(--wheat);border-color:var(--wheat);color:#14201a}
+.chip.w{background:light-dark(#fff4dd,#3a2e12)}
+.m em{font-style:normal;font-size:11px;color:var(--wheat);font-weight:900}
+.sticky{position:sticky;bottom:0;background:var(--bg);padding:12px 0 calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.sticky b{font-size:20px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.foot{margin-top:28px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:700;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+.empty{padding:24px;text-align:center;color:var(--mute);border:2px dashed var(--line);border-radius:14px}
+[hidden]{display:none!important}
+@media(max-width:600px){.tally{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>청년부 출석 <small id="sync">연결 중…</small></h1>
+  <div class="date">
+    <button id="prev" aria-label="지난 주일">◀</button>
+    <input type="date" id="date" aria-label="날짜">
+    <button id="next" aria-label="다음 주일">▶</button>
+  </div>
+  <nav class="tabs">
+    <a href="#dashboard" data-v="dashboard">대시보드</a>
+    <a href="#check" data-v="check">출석체크</a>
+  </nav>
+</header>
+<main>
+  <div id="warn" class="warn" hidden></div>
+  <section id="v-dashboard">
+    <div class="tally">
+      <div><div class="big" id="tTotal">0<span> / 0명</span></div><div class="note" id="tRate"></div></div>
+      <div class="kpis">
+        <div class="kpi"><span>제출한 목장</span><b id="kSub">0 / 0</b></div>
+        <div class="kpi"><span>목장모임 참석</span><b id="kGroup">0명</b></div>
+        <div class="kpi"><span>새가족 출석</span><b id="kNew">0명</b></div>
+        <div class="kpi"><span>방문자</span><b id="kGuest">0명</b></div>
+      </div>
+      <div class="meter"><i id="tMeter" style="width:0"></i></div>
+    </div>
+    <h2>목장별 출석</h2>
+    <div class="rows" id="rows"></div>
+    <p class="note">목장을 누르면 출석자·결석자 이름이 보여요. 제출하면 바로 반영돼요.</p>
+    <div class="foot"><span class="note">출석 정보는 교인 외에 공유하지 말아 주세요.</span><button class="btn ghost sm" id="logoutD">로그아웃</button></div>
+  </section>
+  <section id="v-check" hidden><div id="checkBody"></div></section>
+  <section id="v-login" hidden><div id="loginBody"></div></section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ================= 설정: Firebase 프로젝트 (youth-attendance) ================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyAErq67jqfL37f63R-Ei94UjRFSS77SCvk",
+  authDomain: "youth-attendance-7a450.firebaseapp.com",
+  projectId: "youth-attendance-7a450",
+  storageBucket: "youth-attendance-7a450.firebasestorage.app",
+  messagingSenderId: "235525226164",
+  appId: "1:235525226164:web:be2bc56106f09c2875e1e1"
+};
+// 참고: 위 값은 비밀번호가 아니라 '어느 Firebase 프로젝트인지' 알려 주는 주소예요.
+// 공개돼도 괜찮고, 실제 보호는 firestore.rules(보안 규칙)와 로그인이 맡아요.
+const EDITOR_EMAIL = "editor@youth.app";   // 편집 계정 (목자용)
+const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (부장님·팀장·목사님용)
+/* ========================================================================== */
+
+const FB='https://www.gstatic.com/firebasejs/10.12.2/';
+const DEMO=!firebaseConfig.projectId;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const toast=t=>{const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200)};
+const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+/* ---------- 저장소 (Firebase 또는 체험 모드) ---------- */
+let store;
+if(!DEMO){
+  const [{initializeApp},F,A]=await Promise.all([import(FB+'firebase-app.js'),import(FB+'firebase-firestore.js'),import(FB+'firebase-auth.js')]);
+  const app=initializeApp(firebaseConfig),fs=F.getFirestore(app),auth=A.getAuth(app);
+  store={
+    onAuth:cb=>A.onAuthStateChanged(auth,u=>cb(!u?'':u.email===EDITOR_EMAIL?'edit':'view')),
+    login:async pw=>{try{await A.signInWithEmailAndPassword(auth,EDITOR_EMAIL,pw)}catch(e){await A.signInWithEmailAndPassword(auth,VIEWER_EMAIL,pw)}},
+    logout:()=>A.signOut(auth),
+    onGroups:(cb,err)=>F.onSnapshot(F.collection(fs,'groups'),s=>cb(s.docs.map(d=>({...d.data(),id:d.id})),s.metadata.fromCache),err),
+    onAtt:(date,cb,err)=>F.onSnapshot(F.query(F.collection(fs,'attendance'),F.where('date','==',date)),s=>cb(s.docs.map(d=>d.data())),err),
+    setGroup:(id,d)=>F.setDoc(F.doc(fs,'groups',id),d),
+    delGroup:id=>F.deleteDoc(F.doc(fs,'groups',id)),
+    setAtt:(id,d)=>F.setDoc(F.doc(fs,'attendance',id),d)
+  };
+}else{
+  const load=()=>{try{return JSON.parse(localStorage.getItem('demo'))||null}catch(e){return null}};
+  let D=load()||{groups:{},att:{}},role='';const subs=new Set();
+  const emit=()=>{ls.set('demo',JSON.stringify(D));subs.forEach(f=>f())};
+  const sub=f=>{subs.add(f);setTimeout(f,0);return()=>subs.delete(f)};
+  let authCb=()=>{};
+  store={
+    onAuth:cb=>{authCb=cb;cb(role)},
+    login:async pw=>{if(pw==='1234')role='edit';else if(pw==='0000')role='view';else throw{code:'auth/invalid-credential'};authCb(role)},
+    logout:async()=>{role='';authCb('')},
+    onGroups:cb=>sub(()=>cb(Object.values(D.groups),false)),
+    onAtt:(date,cb)=>sub(()=>cb(Object.values(D.att).filter(a=>a.date===date))),
+    setGroup:async(id,d)=>{D.groups[id]={...d,id};emit()},
+    delGroup:async id=>{delete D.groups[id];emit()},
+    setAtt:async(id,d)=>{D.att[id]=d;emit()}
+  };
+  const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 편집 비밀번호 <b>1234</b>, 보기 비밀번호 <b>0000</b>';
+}
+
+/* ---------- 상태 ---------- */
+let groups=[],att={},loaded=false,role='',unG=null;
+let view='dashboard',open=new Set(),gid=ls.get('gid')||'',draft=null,editing=false,unAtt=null;
+const pad=n=>String(n).padStart(2,'0');
+const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const lastSunday=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return fmt(d)};
+let date=lastSunday();$('#date').value=date;
+const shift=n=>{const d=new Date(date+'T12:00');d.setDate(d.getDate()+n);setDate(fmt(d))};
+$('#prev').onclick=()=>shift(-7);$('#next').onclick=()=>shift(7);
+$('#date').onchange=e=>e.target.value&&setDate(e.target.value);
+function setDate(d){date=d;$('#date').value=d;draft=null;subAtt();render()}
+
+const parseMembers=t=>t.split(/\n/).map(s=>s.trim()).filter(Boolean).map(s=>({name:s.replace(/\*$/,'').trim(),isNew:/\*$/.test(s)}));
+const memberText=ms=>(ms||[]).map(m=>m.name+(m.isNew?'*':'')).join('\n');
+const sorted=()=>[...groups].sort((a,b)=>(a.order??99)-(b.order??99)||String(a.name).localeCompare(b.name,'ko',{numeric:true}));
+const errMsg=e=>e?.code==='permission-denied'?'권한이 없어요. 다시 로그인해 주세요':'저장 실패: 인터넷 연결을 확인해 주세요';
+
+/* ---------- 대시보드 ---------- */
+function stats(g){
+  const a=att[g.id];
+  // present = 목장모임까지 참석(O), worship = 예배만(△), absent = 결석(X)
+  if(a){const o=a.present||[],w=a.worship||[],x=a.absent||[];return{sub:true,present:o,worship:w,came:o.length+w.length,absent:x,newP:a.newPresent||[],guests:a.guests||[],total:o.length+w.length+x.length,a}}
+  return{sub:false,present:[],worship:[],came:0,absent:[],newP:[],guests:[],total:(g.members||[]).length,a:null};
+}
+function renderDash(){
+  const gs=sorted();let P=0,T=0,N=0,G=0,S=0,M=0;
+  $('#rows').innerHTML=gs.map(g=>{const s=stats(g);P+=s.came;M+=s.present.length;T+=s.total;N+=s.newP.length;G+=s.guests.length;S+=s.sub?1:0;
+    const pct=s.total?Math.round(s.came/s.total*100):0,isOpen=open.has(g.id);
+    const when=s.a?.submittedAt?new Date(s.a.submittedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    const chip=(n,c='')=>`<span class="chip ${c}">${esc(n)}</span>`;
+    return `<div class="row"><button data-open="${esc(g.id)}" aria-expanded="${isOpen}">
+      <span class="rname">${esc(g.name)}<small>목자 ${esc(g.leader||'-')}</small>${s.sub?'<span class="badge ok">제출</span>':'<span class="badge no">미제출</span>'}</span>
+      <span class="rnum">${s.sub?s.came:'–'}<small> / ${s.total}명</small></span>
+      <span class="bar"><i style="width:${pct}%"></i></span></button>
+      ${!isOpen?'':`<div class="detail">${s.sub?`
+        <h3>출석 ${s.came}명 · 목장모임까지 O ${s.present.length}명</h3><div class="chips">${s.present.map(n=>s.newP.includes(n)?chip(n+' · 새가족','p n'):chip(n,'p')).join('')||'<span class="note">없음</span>'}</div>
+        ${s.worship.length?`<h3>예배만 △ ${s.worship.length}명</h3><div class="chips">${s.worship.map(n=>chip(n+(s.newP.includes(n)?' · 새가족':''),'w')).join('')}</div>`:''}
+        <h3>결석 ${s.absent.length}명</h3><div class="chips">${s.absent.map(n=>chip(n)).join('')||'<span class="note">없음</span>'}</div>
+        ${s.guests.length?`<h3>방문자 ${s.guests.length}명</h3><div class="chips">${s.guests.map(n=>chip(n,'n')).join('')}</div>`:''}
+        ${s.a.note?`<h3>메모</h3><div>${esc(s.a.note)}</div>`:''}
+        <p class="note">${esc(when)} 제출${s.a.by?' · '+esc(s.a.by):''}</p>`
+        :`<h3>아직 제출 전이에요 · 명단 ${s.total}명</h3><div class="chips">${(g.members||[]).map(m=>chip(m.name)).join('')}</div>`}</div>`}</div>`}).join('')
+    ||`<div class="empty">${loaded?'아직 목장이 없어요. ‘출석체크’ 탭에서 목장을 만들어 주세요.':'불러오는 중…'}</div>`;
+  $('#tTotal').innerHTML=`${P}<span> / ${T}명</span>`;
+  const r=T?Math.round(P/T*100):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`;$('#tMeter').style.width=r+'%';
+  $('#kSub').textContent=`${S} / ${gs.length}`;$('#kGroup').textContent=M+'명';$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
+  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const id=b.dataset.open;open.has(id)?open.delete(id):open.add(id);renderDash()});
+}
+
+/* ---------- 출석체크 (명단 수정 포함) ---------- */
+function renderLogin(box){
+  box.innerHTML=`<div class="panel"><h2 style="margin-top:0">청년부 교인 전용</h2>
+  <p class="note" style="margin-top:0">출석 정보는 교인만 볼 수 있어요. 안내받은 비밀번호를 입력해 주세요.</p>
+  <div class="field"><label for="pw">비밀번호</label>
+  <input type="password" id="pw" autocomplete="current-password" placeholder="비밀번호 입력"></div>
+  <div class="actions"><button class="btn" id="pwGo">들어가기</button><span class="note" id="pwMsg"></span></div>
+  <p class="note">한 번 들어오면 이 기기에서는 로그인이 유지돼요. 공용 기기라면 다 쓴 뒤 로그아웃해 주세요.</p></div>`;
+  const go=async()=>{$('#pwGo').disabled=true;try{await store.login($('#pw').value.trim())}catch(e){
+    const c=e.code||'';$('#pwMsg').textContent=/invalid|wrong|password/.test(c)?'비밀번호가 맞지 않아요':/too-many/.test(c)?'여러 번 틀려서 잠시 막혔어요. 몇 분 뒤 다시 해 주세요':'로그인 실패: 잠시 후 다시 시도하세요';
+    $('#pw').value='';$('#pw').focus();$('#pwGo').disabled=false}};
+  $('#pwGo').onclick=go;
+  // 주의: 엔터일 때만 제출. (예전 코드는 엔터가 아닌 키를 모두 막아서 글자가 안 쳐졌음)
+  $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)go()});
+}
+function renderCheck(){
+  const box=$('#checkBody');
+  if(role!=='edit'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">보기 전용으로 들어오셨어요</h2>
+    <p>출석 체크와 명단 수정은 <b>편집 비밀번호</b>로 들어와야 할 수 있어요. 목자라면 로그아웃한 뒤 편집 비밀번호로 다시 들어와 주세요.</p>
+    <button class="btn ghost" id="lo2">로그아웃</button></div>`;$('#lo2').onclick=()=>store.logout();return}
+  const gs=sorted();
+  if(!gs.length){
+    box.innerHTML=`<div class="empty"><p>아직 목장이 없어요.</p><div class="actions" style="justify-content:center">
+      <button class="btn" id="make13">목장 13개 한 번에 만들기</button></div>
+      <p class="note">‘1목장’~‘13목장’이 만들어져요. 이름·목자·명단은 각 목장에서 ‘명단 수정’으로 바꾸면 돼요.</p></div>`;
+    $('#make13').onclick=async e=>{e.target.disabled=true;try{for(let i=1;i<=13;i++){const id='g'+pad(i);await store.setGroup(id,{id,name:i+'목장',leader:'',members:[],order:i})}toast('목장 13개를 만들었어요')}catch(err){toast(errMsg(err));e.target.disabled=false}};
+    return;
+  }
+  if(!gs.find(g=>g.id===gid))gid=gs[0].id;
+  const g=gs.find(x=>x.id===gid),a=att[g.id],ms=g.members||[];
+  const picker=`<div class="gpick">${gs.map(x=>`<button class="gp" data-g="${esc(x.id)}" aria-pressed="${x.id===g.id}">${esc(x.name)}<small>${att[x.id]?'✓ 제출됨':esc(x.leader||'')}</small></button>`).join('')}</div>`;
+  const foot=`<div class="foot"><button class="btn ghost sm" id="addG">+ 목장 추가</button><button class="btn ghost sm" id="logout">로그아웃</button></div>`;
+  if(editing){
+    box.innerHTML=picker+`<div class="panel"><h2 style="margin-top:0">${esc(g.name)} 명단 수정</h2>
+      <div class="grid2"><div class="field"><label for="en">목장 이름</label><input type="text" id="en" value="${esc(g.name)}"></div>
+      <div class="field"><label for="el">목자</label><input type="text" id="el" value="${esc(g.leader||'')}"></div></div>
+      <div class="field"><label for="em">명단 · 한 줄에 한 명, 새가족은 이름 뒤에 *</label><textarea id="em" placeholder="김하늘&#10;이소망&#10;박은혜*">${esc(memberText(ms))}</textarea></div>
+      <div class="field" style="max-width:160px"><label for="eo">표시 순서</label><input type="number" id="eo" value="${g.order??''}"></div>
+      <div class="actions"><button class="btn" id="eSave">저장</button><button class="btn ghost" id="eCancel">취소</button><button class="btn ghost" id="eDel">목장 삭제</button></div></div>`+foot;
+    $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
+      try{await store.setGroup(g.id,{...g,name,leader:$('#el').value.trim(),members:parseMembers($('#em').value),order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
+    $('#eCancel').onclick=()=>{editing=false;renderCheck()};
+    const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
+      try{await store.delGroup(g.id);editing=false;gid='';toast('삭제했어요')}catch(e){toast(errMsg(e))}};
+  }else{
+    // 상태: 'O' = 목장모임까지 참석, 'W' = 예배만(△), '' = 결석(X)
+    if(!draft||draft.gid!==g.id){const st=new Map();(a?.present||[]).forEach(n=>st.set(n,'O'));(a?.worship||[]).forEach(n=>st.set(n,'W'));
+      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),note:a?.note||'',by:a?.by||ls.get('by')||g.leader||''}}
+    const S=n=>draft.st.get(n)||'';
+    const cntText=()=>{let o=0,w=0;ms.forEach(m=>{const v=S(m.name);if(v==='O')o++;else if(v==='W')w++});return `<b>${o+w}</b> / ${ms.length}명 출석 <span class="note">(O ${o} · △ ${w})</span>`};
+    const paint=(b,n)=>{const v=S(n);b.setAttribute('aria-pressed',v==='O'?'true':v==='W'?'mixed':'false');b.querySelector('.dot').textContent=v==='W'?'△':'✓';$('#cnt').innerHTML=cntText()};
+    box.innerHTML=picker+`<div class="ghead"><h2>${esc(g.name)} <span class="note">목자 ${esc(g.leader||'-')}</span></h2><button class="btn ghost sm" id="edit">명단 수정</button></div>
+    <p class="note">${a?'이미 제출된 기록이 있어요. 고쳐서 다시 제출하면 덮어써요.':ms.length?'이름을 누르면 O(목장모임까지 참석), <b>꾹 누르면 △(예배만)</b>예요.':'명단이 비어 있어요. ‘명단 수정’을 눌러 이름을 넣어 주세요.'}</p>
+    ${ms.length?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
+    <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
+    <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
+    <div class="grid2"><div class="field"><label for="by">제출자</label><input type="text" id="by" value="${esc(draft.by)}"></div>
+    <div class="field"><label for="memo">메모 (선택)</label><input type="text" id="memo" value="${esc(draft.note)}" placeholder="기도제목, 결석 사유 등"></div></div>
+    <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
+    $('#edit').onclick=()=>{editing=true;renderCheck()};
+    // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
+    box.querySelectorAll('.m').forEach(b=>{const n=b.dataset.n;let t=null,longDone=false;
+      const cancel=()=>{clearTimeout(t);t=null};
+      b.addEventListener('pointerdown',()=>{longDone=false;cancel();t=setTimeout(()=>{longDone=true;draft.st.set(n,'W');paint(b,n);if(navigator.vibrate)try{navigator.vibrate(30)}catch(e){}},500)});
+      ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,cancel));
+      b.addEventListener('contextmenu',e=>e.preventDefault());
+      b.addEventListener('click',()=>{if(longDone){longDone=false;return}draft.st.set(n,S(n)==='O'?'':S(n)==='W'?'':'O');paint(b,n)});
+    });
+    if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
+    $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;$('#by').oninput=e=>draft.by=e.target.value;
+    $('#submit').onclick=async e=>{e.target.disabled=true;
+      const is=v=>m=>S(m.name)===v;
+      const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
+        newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
+        note:draft.note.trim(),by:draft.by.trim(),submittedAt:new Date().toISOString()};
+      try{await store.setAtt(`${date}_${g.id}`,rec);ls.set('by',rec.by);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
+      catch(err){toast(errMsg(err));e.target.disabled=false}};
+  }
+  box.querySelectorAll('.gp').forEach(b=>b.onclick=()=>{gid=b.dataset.g;ls.set('gid',gid);draft=null;editing=false;renderCheck()});
+  $('#addG').onclick=async()=>{const id='g'+Date.now().toString(36),order=Math.max(0,...gs.map(x=>x.order||0))+1;
+    try{await store.setGroup(id,{id,name:'새 목장',leader:'',members:[],order});gid=id;editing=true;toast('목장을 추가했어요. 이름을 정해 주세요')}catch(e){toast(errMsg(e))}};
+  $('#logout').onclick=()=>store.logout();
+}
+
+/* ---------- 화면 전환 ---------- */
+const typing=()=>{const f=document.activeElement;return f&&f.closest&&f.closest('#v-check')&&f.matches('input,textarea')};
+function render(){
+  const out=!role;
+  $('.date').hidden=out;$('.tabs').hidden=out;$('#v-login').hidden=!out;
+  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';
+  if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));$('#sync').textContent='';return}
+  document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+  if(view==='dashboard')renderDash();else if(!typing())renderCheck();
+}
+const route=()=>{view=location.hash==='#check'?'check':'dashboard';render()};
+addEventListener('hashchange',route);
+
+/* ---------- 데이터 연결 ---------- */
+function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>{$('#sync').textContent='연결 끊김'})}
+let timer=null;
+function subAll(){
+  unG&&unG();unG=null;groups=[];loaded=false;clearTimeout(timer);
+  if(!role){subAtt();return}
+  $('#sync').textContent='연결 중…';
+  timer=setTimeout(()=>{if(!loaded){$('#sync').textContent='연결 지연';const w=$('#warn');w.hidden=false;w.textContent='데이터를 불러오지 못하고 있어요. 인터넷 연결을 확인해 주세요.'}},10000);
+  unG=store.onGroups((list,cache)=>{clearTimeout(timer);loaded=true;groups=list;if(!cache)$('#sync').textContent=(DEMO?'체험 모드':'연결됨')+(role==='edit'?' · 편집':' · 보기');render()},
+    ()=>{clearTimeout(timer);loaded=true;$('#sync').textContent='연결 끊김';render()});
+  subAtt();
+}
+store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});
+$('#logoutD').onclick=()=>store.logout();
+route();
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
