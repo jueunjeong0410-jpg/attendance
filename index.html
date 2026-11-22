@@ -149,6 +149,7 @@ const firebaseConfig = {
 // 공개돼도 괜찮고, 실제 보호는 firestore.rules(보안 규칙)와 로그인이 맡아요.
 const EDITOR_EMAIL = "editor@youth.app";   // 편집 계정 (목자용)
 const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (부장님·팀장·목사님용)
+const SHEET_SYNC_URL = "";   // 구글 시트 스크립트의 웹 앱 주소 (비어 있으면 시트 신호를 보내지 않음)
 /* ========================================================================== */
 
 const FB='https://www.gstatic.com/firebasejs/10.12.2/';
@@ -191,6 +192,14 @@ if(!DEMO){
   };
   const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 편집 비밀번호 <b>1234</b>, 보기 비밀번호 <b>0000</b>';
 }
+
+/* ---------- 구글 시트에 '업데이트해 줘' 신호 ----------
+   저장이 성공하면 시트 스크립트에 신호만 보내요(데이터는 안 보냄). 시트는 Firebase에서 직접 읽어요.
+   여러 번 연달아 저장하면(예: 목장 13개 만들기) 3초 동안 모았다가 한 번만 보내요. */
+let pingT=null;
+const pingSheet=()=>{if(!SHEET_SYNC_URL)return;clearTimeout(pingT);
+  pingT=setTimeout(()=>{try{fetch(SHEET_SYNC_URL,{method:'POST',mode:'no-cors',keepalive:true}).catch(()=>{})}catch(e){}},3000)};
+['setGroup','delGroup','setAtt'].forEach(k=>{const f=store[k];store[k]=async(...a)=>{const r=await f(...a);pingSheet();return r}});
 
 /* ---------- 상태 ---------- */
 let groups=[],att={},loaded=false,role='',unG=null;
