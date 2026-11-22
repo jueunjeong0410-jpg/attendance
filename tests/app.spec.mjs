@@ -183,15 +183,34 @@ test('저장하면 구글 시트에 업데이트 신호를 보내고, 연달아 
   expect(Number(await (await request.get('/__pings')).text())).toBeGreaterThanOrEqual(2);
 });
 
-test('대시보드에 구글 시트 바로가기 버튼이 있고 새 탭으로 열린다', async ({ page }) => {
+test('편집 권한이면 구글 시트 버튼이 새 탭 링크로 열린다', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전에는 안 보임
-  await login(page, VIEW_PW);
+  await login(page, EDIT_PW);
   const link = page.locator('#sheetLink');
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute('href', /docs\.google\.com\/spreadsheets\/d\//);
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(link).toContainText('구글 시트');
+});
+
+test('보기 권한이면 구글 시트로 못 넘어가고 안내가 3초 뒤 사라진다', async ({ page, context }) => {
+  await page.goto('/');
+  await login(page, VIEW_PW);
+  const link = page.locator('#sheetLink');
+  await expect(link).toBeVisible();
+  expect(await link.getAttribute('href')).toBeNull();               // 주소 자체가 없음(길게 눌러 복사도 불가)
+  let opened = false; context.on('page', () => { opened = true });
+  await link.click();
+  const t = page.locator('#toast');
+  await expect(t).toHaveText('뷰어 기능에선 지원하지 않는 기능입니다.');
+  await expect(t).toHaveClass(/on/);
+  await page.waitForTimeout(2500);
+  await expect(t).toHaveClass(/on/);                                 // 2.5초엔 아직 보임
+  await page.waitForTimeout(800);
+  await expect(t).not.toHaveClass(/on/);                             // 3초 뒤 사라짐
+  expect(opened).toBe(false);
+  expect(page.url()).not.toContain('docs.google.com');
 });
 
 test('출석체크에 제출자 칸이 없다', async ({ page }) => {
