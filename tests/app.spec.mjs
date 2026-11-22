@@ -231,15 +231,6 @@ test('메모가 하나도 없으면 안내 문구가 보인다', async ({ page }
   await expect(page.locator('#memos')).toContainText('메모가 없어요');
 });
 
-test('화면 위에 Made by 정주은이 보이고 연결 상태 글자는 없다', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('.top h1')).toContainText('Made by 정주은');
-  await login(page, EDIT_PW);
-  await expect(page.locator('.top h1')).toContainText('Made by 정주은');
-  await expect(page.locator('.top h1')).not.toContainText('연결됨');
-  await expect(page.locator('.top h1')).not.toContainText('편집');
-});
-
 test('방문자 숫자 칸과 "방문자를 숫자로도 기록" 설정은 없다 (방문자는 이름으로만)', async ({ page }) => {
   await setupGroups(page);
   await fillRoster(page, ['가목자']);
@@ -247,4 +238,13 @@ test('방문자 숫자 칸과 "방문자를 숫자로도 기록" 설정은 없�
   await page.click('#edit');
   await expect(page.locator('#ecg')).toHaveCount(0);
   await expect(page.locator('#checkBody')).not.toContainText('방문자를 숫자로도 기록');
+});
+
+test('화면 왼쪽 위 제목은 "강서성결교회 청년부 출석부"이고 Made by·연결 상태 글자는 없다', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.top h1')).toHaveText('강서성결교회 청년부 출석부');
+  await login(page, EDIT_PW);
+  await expect(page.locator('.top h1')).toHaveText('강서성결교회 청년부 출석부');
+  await expect(page.locator('body')).not.toContainText('Made by');
+  await expect(page.locator('.top')).not.toContainText('연결됨');
 });
