@@ -1,10 +1,12 @@
 /**
  * 청년부 출석 → 구글 시트 자동 기록 (Google Apps Script)
  *
- * 하는 일: 앱(Firebase)에 저장된 출석 기록을 읽어서 '출석현황' 시트에 월별 표로 적어요.
+ * 하는 일: 앱(Firebase)에 저장된 출석 기록을 읽어서 연도별 시트('2026 출석현황' 등)에 월별 표로 적어요.
  *   - 왼쪽: A열 목장, B열 이름 (고정)
  *   - 오른쪽: 월별 표가 이어지고, 달과 달 사이는 한 열 비워요
  *   - O = 목장모임까지 참석, △ = 예배만, X = 결석, 빈칸 = 그 주 기록 없음
+ *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), 4번째 줄: 날짜별 방문자 수 합계
+ *   - '방문자 수 기록'을 켠 목장은 명단 아래 방문자 수 줄 추가
  *
  * 설정 (코드에는 비밀번호를 적지 않아요):
  *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성에 4개를 넣어 주세요.
@@ -13,11 +15,12 @@
  *     VIEWER_EMAIL         보기 계정 이메일 (예: viewer@youth.app)
  *     VIEWER_PASSWORD      보기 계정 비밀번호
  *
- * 주의: '출석현황' 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
+ * 주의: 연도별 출석현황 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
  */
 
-var SHEET_NAME = '출석현황';
+var SHEET_NAME = '출석현황';   // 연도별 시트 이름: '2026 출석현황' 처럼 앞에 연도가 붙어요
 var FIRST_DATA_COL = 2;   // 0부터 셈: 0=A(목장), 1=B(이름), 2=C부터 날짜
+var HEADER_ROWS = 4;      // 1줄: 월, 2줄: 날짜, 3줄: 총 참석, 4줄: 방문자 수
 
 /* ---------- 메뉴 ---------- */
 function onOpen() {
@@ -44,7 +47,26 @@ function updateAttendanceSheet() {
   var token = signIn_(p);
   var groups = listDocs_(p, token, 'groups');
   var records = listDocs_(p, token, 'attendance');
-  writeSheet_(buildGrid(groups, records));
+  var thisYear = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy'));
+  var ss = SpreadsheetApp.getActive();
+  // 예전 '출석현황' 시트가 있으면 지우지 않고 올해 시트 이름으로 바꿔 써요
+  var old = ss.getSheetByName(SHEET_NAME);
+  if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
+  yearsToWrite(records, thisYear).forEach(function (y, i) {
+    var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
+    var sh = writeSheet_(buildGrid(groups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
+    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);   // 최신 연도가 맨 앞
+  });
+}
+
+/* ---------- 연도별 시트 ---------- */
+function sheetNameForYear(y) { return y + ' ' + SHEET_NAME; }
+
+// 기록이 있는 연도 + 올해(기록이 없어도 빈 표를 만들어 둠), 최신 연도부터
+function yearsToWrite(records, thisYear) {
+  var ys = {}; ys[thisYear] = true;
+  records.forEach(function (r) { var y = Number(String(r.date || '').slice(0, 4)); if (y) ys[y] = true; });
+  return Object.keys(ys).map(Number).sort(function (a, b) { return b - a; });
 }
 
 /* ---------- 앱에서 저장하면 바로 업데이트 (웹 앱 신호) ----------
@@ -129,7 +151,7 @@ function sundaysOfMonth_(ym) {
   return out;
 }
 
-function buildGrid(groups, records) {
+function buildGrid(groups, records, title) {
   var sorted = groups.slice().sort(function (a, b) {
     var oa = a.order == null ? 99 : a.order, ob = b.order == null ? 99 : b.order;
     return oa - ob || String(a.name).localeCompare(String(b.name), 'ko', { numeric: true });
@@ -145,7 +167,7 @@ function buildGrid(groups, records) {
 
   // 행: 목장 순서대로 현재 명단 + (명단에서 빠졌지만 기록에 있는 사람)
   var rows = [], seenGroup = {};
-  function addGroup(gid, name, roster) {
+  function addGroup(gid, name, roster, countGuests) {
     seenGroup[gid] = true;
     var names = roster.slice(), have = {};
     names.forEach(function (n) { have[n] = true; });
@@ -156,9 +178,11 @@ function buildGrid(groups, records) {
       });
     });
     names.forEach(function (n) { rows.push({ gid: gid, group: name, name: n }); });
+    // '방문자 수 기록'을 켠 목장은 맨 아래에 방문자 수 줄을 더해요
+    if (countGuests) rows.push({ gid: gid, group: name, name: '방문자 수', guest: true });
   }
   sorted.forEach(function (g) {
-    addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }));
+    addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }), g.countGuests === true);
   });
   // 삭제된 목장이라도 기록이 있으면 아래에 남겨요
   records.forEach(function (r) {
@@ -178,14 +202,28 @@ function buildGrid(groups, records) {
   var width = FIRST_DATA_COL;
   blocks.forEach(function (b, i) { b.col = width; width += b.dates.length + (i < blocks.length - 1 ? 1 : 0); });
 
-  var header1 = new Array(width).fill(''), header2 = new Array(width).fill('');
-  header1[0] = '청년부 출석현황'; header2[0] = '목장'; header2[1] = '이름';
+  var header1 = new Array(width).fill(''), header2 = new Array(width).fill(''), header3 = new Array(width).fill(''), header4 = new Array(width).fill('');
+  header1[0] = title || '청년부 출석현황'; header2[0] = '목장'; header2[1] = '이름';
+  header3[0] = '전체'; header3[1] = '총 참석';
+  header4[0] = '전체'; header4[1] = '방문자 수';
   blocks.forEach(function (b) {
     header1[b.col] = b.ym.slice(0, 4) + '년 ' + Number(b.ym.slice(5, 7)) + '월';
-    b.dates.forEach(function (d, j) { header2[b.col + j] = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)); });
+    b.dates.forEach(function (d, j) {
+      header2[b.col + j] = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10));
+      // 총 참석 = 그날 제출된 모든 목장의 O + △ (방문자는 빼고, 대시보드 숫자와 같아요)
+      // 방문자 수 = 그날 모든 목장의 방문자(숫자로 적은 값과 이름 개수 중 큰 값) 합계
+      var total = 0, guests = 0, any = false;
+      records.forEach(function (r) {
+        if (r.date !== d) return;
+        any = true; total += (r.present || []).length + (r.worship || []).length;
+        guests += Math.max(Number(r.guestCount) || 0, (r.guests || []).length);
+      });
+      header3[b.col + j] = any ? total : '';
+      header4[b.col + j] = any ? guests : '';
+    });
   });
 
-  var values = [header1, header2];
+  var values = [header1, header2, header3, header4];
   rows.forEach(function (row) {
     var line = new Array(width).fill('');
     line[0] = row.group; line[1] = row.name;
@@ -193,6 +231,7 @@ function buildGrid(groups, records) {
       b.dates.forEach(function (d, j) {
         var r = byKey[d + '|' + row.gid];
         if (!r) return;
+        if (row.guest) { line[b.col + j] = Math.max(Number(r.guestCount) || 0, (r.guests || []).length); return; }
         if ((r.present || []).indexOf(row.name) >= 0) line[b.col + j] = 'O';
         else if ((r.worship || []).indexOf(row.name) >= 0) line[b.col + j] = '△';
         else if ((r.absent || []).indexOf(row.name) >= 0) line[b.col + j] = 'X';
@@ -206,20 +245,21 @@ function buildGrid(groups, records) {
   rows.forEach(function (row, i) {
     var last = groupRuns[groupRuns.length - 1];
     if (last && last.gid === row.gid) last.span++;
-    else groupRuns.push({ gid: row.gid, start: i + 2, span: 1 });
+    else groupRuns.push({ gid: row.gid, start: i + HEADER_ROWS, span: 1 });
   });
 
   return {
     values: values, width: width,
     months: blocks.map(function (b) { return { col: b.col, span: b.dates.length, title: header1[b.col] }; }),
-    groupRuns: groupRuns.map(function (g) { return { start: g.start, span: g.span }; })
+    groupRuns: groupRuns.map(function (g) { return { start: g.start, span: g.span }; }),
+    guestRows: rows.map(function (row, i) { return row.guest ? i + HEADER_ROWS : -1; }).filter(function (i) { return i >= 0; })
   };
 }
 
 /* ---------- 시트에 쓰기 ---------- */
-function writeSheet_(grid) {
+function writeSheet_(grid, sheetName) {
   var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+  var sh = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
   sh.clear(); sh.clearConditionalFormatRules();
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
 
@@ -235,22 +275,29 @@ function writeSheet_(grid) {
     r.setHorizontalAlignment('center').setFontWeight('bold').setBackground('#1f5c3f').setFontColor('#ffffff');
   });
   sh.getRange(2, 1, 1, cols).setFontWeight('bold').setBackground('#f3f6f2').setHorizontalAlignment('center');
+  sh.getRange(3, 1, 1, cols).setFontWeight('bold').setBackground('#cfe6d6').setFontColor('#1f5c3f').setHorizontalAlignment('center');
+  sh.getRange(4, 1, 1, cols).setFontWeight('bold').setBackground('#fff4dd').setFontColor('#8a5a00').setHorizontalAlignment('center');
+  sh.getRange(3, 1, 2, 1).merge().setVerticalAlignment('middle');   // A3:A4 '전체' 한 칸
+  grid.guestRows.forEach(function (i) {
+    sh.getRange(i + 1, 2, 1, cols - 1).setBackground('#fff4dd').setFontColor('#8a5a00').setFontWeight('bold').setHorizontalAlignment('center');
+  });
   // 같은 목장명은 A열에서 세로로 합쳐서 보기 편하게
   grid.groupRuns.forEach(function (g) {
     var r = sh.getRange(g.start + 1, 1, g.span, 1);
     if (g.span > 1) r.merge();
     r.setVerticalAlignment('middle').setHorizontalAlignment('center').setFontWeight('bold');
   });
-  sh.setFrozenRows(2); sh.setFrozenColumns(2);
+  sh.setFrozenRows(HEADER_ROWS); sh.setFrozenColumns(2);
   sh.setColumnWidth(1, 110); sh.setColumnWidth(2, 80);
   if (cols > 2) sh.setColumnWidths(3, cols - 2, 46);
 
-  if (rows > 2 && cols > 2) {
-    var data = sh.getRange(3, 3, rows - 2, cols - 2);
+  if (rows > HEADER_ROWS && cols > 2) {
+    var data = sh.getRange(HEADER_ROWS + 1, 3, rows - HEADER_ROWS, cols - 2);
     data.setHorizontalAlignment('center');
     var rule = function (text, bg, fg) {
       return SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(bg).setFontColor(fg).setRanges([data]).build();
     };
     sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('X', '#fbe3dc', '#b3402a')]);
   }
+  return sh;
 }
