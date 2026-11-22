@@ -25,6 +25,7 @@ button{cursor:pointer}
 .top{position:sticky;top:0;z-index:5;background:var(--green);color:#fff;padding:calc(12px + env(safe-area-inset-top)) max(4vw,14px) 0}
 .top h1{margin:0;font-size:20px;font-weight:900;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .top h1 small{font-size:13px;font-weight:500;opacity:.85}
+.top h1 .credit{font-size:12px;font-weight:400;opacity:.75;letter-spacing:.02em}
 .date{display:flex;align-items:center;gap:6px;margin:10px 0}
 .date button{width:44px;height:44px;border-radius:10px;border:0;background:rgb(255 255 255/.15);color:#fff;font-size:18px}
 .date input{flex:1;height:44px;border-radius:10px;border:0;padding:0 12px;background:#fff;color:#14201a;font-size:16px;font-weight:700}
@@ -105,7 +106,7 @@ textarea#memo{min-height:84px}
 </head>
 <body>
 <header class="top">
-  <h1>청년부 출석 <small id="sync">연결 중…</small></h1>
+  <h1>청년부 출석 <small class="credit">Made by 정주은</small></h1>
   <div class="date">
     <button id="prev" aria-label="지난 주일">◀</button>
     <input type="date" id="date" aria-label="날짜">
@@ -353,7 +354,7 @@ function render(){
   const out=!role;
   $('.date').hidden=out;$('.tabs').hidden=out;$('#v-login').hidden=!out;
   $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';
-  if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));$('#sync').textContent='';return}
+  if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));return}
   document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   if(view==='dashboard')renderDash();else if(!typing())renderCheck();
 }
@@ -361,15 +362,15 @@ const route=()=>{view=location.hash==='#check'?'check':'dashboard';render()};
 addEventListener('hashchange',route);
 
 /* ---------- 데이터 연결 ---------- */
-function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>{$('#sync').textContent='연결 끊김'})}
+const netWarn=t=>{const w=$('#warn');if(DEMO)return;if(t){w.hidden=false;w.textContent=t}else if(w.dataset.net){w.hidden=true}w.dataset.net=t?'1':''};
+function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>netWarn('연결이 끊겼어요. 새로고침해 주세요.'))}
 let timer=null;
 function subAll(){
   unG&&unG();unG=null;groups=[];loaded=false;clearTimeout(timer);
   if(!role){subAtt();return}
-  $('#sync').textContent='연결 중…';
-  timer=setTimeout(()=>{if(!loaded){$('#sync').textContent='연결 지연';const w=$('#warn');w.hidden=false;w.textContent='데이터를 불러오지 못하고 있어요. 인터넷 연결을 확인해 주세요.'}},10000);
-  unG=store.onGroups((list,cache)=>{clearTimeout(timer);loaded=true;groups=list;if(!cache)$('#sync').textContent=(DEMO?'체험 모드':'연결됨')+(role==='edit'?' · 편집':' · 보기');render()},
-    ()=>{clearTimeout(timer);loaded=true;$('#sync').textContent='연결 끊김';render()});
+  timer=setTimeout(()=>{if(!loaded)netWarn('데이터를 불러오지 못하고 있어요. 인터넷 연결을 확인해 주세요.')},10000);
+  unG=store.onGroups((list,cache)=>{clearTimeout(timer);loaded=true;groups=list;if(!cache)netWarn('');render()},
+    ()=>{clearTimeout(timer);loaded=true;netWarn('연결이 끊겼어요. 새로고침해 주세요.');render()});
   subAtt();
 }
 store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});

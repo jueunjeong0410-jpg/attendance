@@ -256,3 +256,12 @@ test('방문자 수 기록을 켠 목장만 방문자를 숫자로 적을 수 �
   await page.click('#edit');
   await expect(page.locator('#ecg')).toBeChecked();
 });
+
+test('화면 위에 Made by 정주은이 보이고 연결 상태 글자는 없다', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.top h1')).toContainText('Made by 정주은');
+  await login(page, EDIT_PW);
+  await expect(page.locator('.top h1')).toContainText('Made by 정주은');
+  await expect(page.locator('.top h1')).not.toContainText('연결됨');
+  await expect(page.locator('.top h1')).not.toContainText('편집');
+});
