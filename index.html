@@ -302,7 +302,7 @@ function renderCheck(){
   }else{
     // 상태: 'O' = 목장모임까지 참석, 'W' = 예배만(△), '' = 결석(X)
     if(!draft||draft.gid!==g.id){const st=new Map();(a?.present||[]).forEach(n=>st.set(n,'O'));(a?.worship||[]).forEach(n=>st.set(n,'W'));
-      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),note:a?.note||'',by:a?.by||ls.get('by')||g.leader||''}}
+      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),note:a?.note||''}}
     const S=n=>draft.st.get(n)||'';
     const cntText=()=>{let o=0,w=0;ms.forEach(m=>{const v=S(m.name);if(v==='O')o++;else if(v==='W')w++});return `<b>${o+w}</b> / ${ms.length}명 출석 <span class="note">(O ${o} · △ ${w})</span>`};
     const paint=(b,n)=>{const v=S(n);b.setAttribute('aria-pressed',v==='O'?'true':v==='W'?'mixed':'false');b.querySelector('.dot').textContent=v==='W'?'△':'✓';$('#cnt').innerHTML=cntText()};
@@ -311,8 +311,7 @@ function renderCheck(){
     ${ms.length?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
     <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
     <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
-    <div class="grid2"><div class="field"><label for="by">제출자</label><input type="text" id="by" value="${esc(draft.by)}"></div>
-    <div class="field"><label for="memo">메모 (선택)</label><input type="text" id="memo" value="${esc(draft.note)}" placeholder="기도제목, 결석 사유 등"></div></div>
+    <div class="field"><label for="memo">메모 (선택)</label><textarea id="memo" rows="3" placeholder="기도제목, 결석 사유 등">${esc(draft.note)}</textarea></div>
     <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
     $('#edit').onclick=()=>{editing=true;renderCheck()};
     // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
@@ -324,13 +323,13 @@ function renderCheck(){
       b.addEventListener('click',()=>{if(longDone){longDone=false;return}draft.st.set(n,S(n)==='O'?'':S(n)==='W'?'':'O');paint(b,n)});
     });
     if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
-    $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;$('#by').oninput=e=>draft.by=e.target.value;
+    $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;
     $('#submit').onclick=async e=>{e.target.disabled=true;
       const is=v=>m=>S(m.name)===v;
       const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
         newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
-        note:draft.note.trim(),by:draft.by.trim(),submittedAt:new Date().toISOString()};
-      try{await store.setAtt(`${date}_${g.id}`,rec);ls.set('by',rec.by);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
+        note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString()};
+      try{await store.setAtt(`${date}_${g.id}`,rec);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
       catch(err){toast(errMsg(err));e.target.disabled=false}};
   }
   box.querySelectorAll('.gp').forEach(b=>b.onclick=()=>{gid=b.dataset.g;ls.set('gid',gid);draft=null;editing=false;renderCheck()});
