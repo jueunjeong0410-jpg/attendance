@@ -5,7 +5,8 @@
  *   - 왼쪽: A열 목장, B열 이름 (고정)
  *   - 오른쪽: 월별 표가 이어지고, 달과 달 사이는 한 열 비워요
  *   - O = 목장모임까지 참석, △ = 예배만, X = 결석, 빈칸 = 그 주 기록 없음
- *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), '방문자 수 기록'을 켠 목장은 방문자 수 줄 추가
+ *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), 4번째 줄: 날짜별 방문자 수 합계
+ *   - '방문자 수 기록'을 켠 목장은 명단 아래 방문자 수 줄 추가
  *
  * 설정 (코드에는 비밀번호를 적지 않아요):
  *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성에 4개를 넣어 주세요.
@@ -19,7 +20,7 @@
 
 var SHEET_NAME = '출석현황';   // 연도별 시트 이름: '2026 출석현황' 처럼 앞에 연도가 붙어요
 var FIRST_DATA_COL = 2;   // 0부터 셈: 0=A(목장), 1=B(이름), 2=C부터 날짜
-var HEADER_ROWS = 3;      // 1줄: 월, 2줄: 날짜, 3줄: 총 참석
+var HEADER_ROWS = 4;      // 1줄: 월, 2줄: 날짜, 3줄: 총 참석, 4줄: 방문자 수
 
 /* ---------- 메뉴 ---------- */
 function onOpen() {
@@ -201,24 +202,28 @@ function buildGrid(groups, records, title) {
   var width = FIRST_DATA_COL;
   blocks.forEach(function (b, i) { b.col = width; width += b.dates.length + (i < blocks.length - 1 ? 1 : 0); });
 
-  var header1 = new Array(width).fill(''), header2 = new Array(width).fill(''), header3 = new Array(width).fill('');
+  var header1 = new Array(width).fill(''), header2 = new Array(width).fill(''), header3 = new Array(width).fill(''), header4 = new Array(width).fill('');
   header1[0] = title || '청년부 출석현황'; header2[0] = '목장'; header2[1] = '이름';
   header3[0] = '전체'; header3[1] = '총 참석';
+  header4[0] = '전체'; header4[1] = '방문자 수';
   blocks.forEach(function (b) {
     header1[b.col] = b.ym.slice(0, 4) + '년 ' + Number(b.ym.slice(5, 7)) + '월';
     b.dates.forEach(function (d, j) {
       header2[b.col + j] = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10));
       // 총 참석 = 그날 제출된 모든 목장의 O + △ (방문자는 빼고, 대시보드 숫자와 같아요)
-      var total = 0, any = false;
+      // 방문자 수 = 그날 모든 목장의 방문자(숫자로 적은 값과 이름 개수 중 큰 값) 합계
+      var total = 0, guests = 0, any = false;
       records.forEach(function (r) {
         if (r.date !== d) return;
         any = true; total += (r.present || []).length + (r.worship || []).length;
+        guests += Math.max(Number(r.guestCount) || 0, (r.guests || []).length);
       });
       header3[b.col + j] = any ? total : '';
+      header4[b.col + j] = any ? guests : '';
     });
   });
 
-  var values = [header1, header2, header3];
+  var values = [header1, header2, header3, header4];
   rows.forEach(function (row) {
     var line = new Array(width).fill('');
     line[0] = row.group; line[1] = row.name;
@@ -271,6 +276,8 @@ function writeSheet_(grid, sheetName) {
   });
   sh.getRange(2, 1, 1, cols).setFontWeight('bold').setBackground('#f3f6f2').setHorizontalAlignment('center');
   sh.getRange(3, 1, 1, cols).setFontWeight('bold').setBackground('#cfe6d6').setFontColor('#1f5c3f').setHorizontalAlignment('center');
+  sh.getRange(4, 1, 1, cols).setFontWeight('bold').setBackground('#fff4dd').setFontColor('#8a5a00').setHorizontalAlignment('center');
+  sh.getRange(3, 1, 2, 1).merge().setVerticalAlignment('middle');   // A3:A4 '전체' 한 칸
   grid.guestRows.forEach(function (i) {
     sh.getRange(i + 1, 2, 1, cols - 1).setBackground('#fff4dd').setFontColor('#8a5a00').setFontWeight('bold').setHorizontalAlignment('center');
   });
