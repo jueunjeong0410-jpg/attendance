@@ -70,6 +70,7 @@ textarea{min-height:200px;resize:vertical}
 .btn.danger{background:var(--red);color:#fff}
 .btn.sm{min-height:36px;padding:0 12px;font-size:14px}
 .btn:disabled{opacity:.5;cursor:default}
+.sheetlink{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .gpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;margin-bottom:16px}
 .gp{min-height:48px;border-radius:12px;border:2px solid var(--line);background:var(--bg);font-weight:700;font-size:14px;padding:4px 6px;line-height:1.25}
@@ -125,7 +126,10 @@ textarea{min-height:200px;resize:vertical}
       </div>
       <div class="meter"><i id="tMeter" style="width:0"></i></div>
     </div>
-    <h2>목장별 출석</h2>
+    <div class="ghead"><h2>목장별 출석</h2>
+      <a class="btn ghost sm sheetlink" id="sheetLink" target="_blank" rel="noopener" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" fill="#1f8f4e"/><path d="M7 8h10M7 12h10M7 16h10M11.5 8v8" stroke="#fff" stroke-width="1.6"/></svg>
+        구글 시트로 보기</a></div>
     <div class="rows" id="rows"></div>
     <p class="note">목장을 누르면 출석자·결석자 이름이 보여요. 제출하면 바로 반영돼요.</p>
     <div class="foot"><span class="note">출석 정보는 교인 외에 공유하지 말아 주세요.</span><button class="btn ghost sm" id="logoutD">로그아웃</button></div>
@@ -149,6 +153,7 @@ const firebaseConfig = {
 // 공개돼도 괜찮고, 실제 보호는 firestore.rules(보안 규칙)와 로그인이 맡아요.
 const EDITOR_EMAIL = "editor@youth.app";   // 편집 계정 (목자용)
 const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (부장님·팀장·목사님용)
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/172_ExrhP-i0CqmUnGhPo06DHBjwO3E8N4OOOdQmOmPg/edit";   // 출석현황 구글 시트
 const SHEET_SYNC_URL = "";   // 구글 시트 스크립트의 웹 앱 주소 (비어 있으면 시트 신호를 보내지 않음)
 /* ========================================================================== */
 
@@ -361,6 +366,7 @@ function subAll(){
 }
 store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});
 $('#logoutD').onclick=()=>store.logout();
+if(SHEET_URL){$('#sheetLink').href=SHEET_URL;$('#sheetLink').hidden=false}
 route();
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>

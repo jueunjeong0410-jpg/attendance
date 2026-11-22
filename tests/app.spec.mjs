@@ -182,3 +182,14 @@ test('저장하면 구글 시트에 업데이트 신호를 보내고, 연달아 
   await page.waitForTimeout(3600);
   expect(Number(await (await request.get('/__pings')).text())).toBeGreaterThanOrEqual(2);
 });
+
+test('대시보드에 구글 시트 바로가기 버튼이 있고 새 탭으로 열린다', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전에는 안 보임
+  await login(page, VIEW_PW);
+  const link = page.locator('#sheetLink');
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', /docs\.google\.com\/spreadsheets\/d\//);
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toContainText('구글 시트');
+});
