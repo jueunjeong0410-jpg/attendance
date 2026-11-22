@@ -158,3 +158,15 @@ test('꾹 누르면 △(예배만), 다시 짧게 누르면 결석이 된다', a
   await again.click();                                             // 짧게 → 결석
   await expect(again).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('비밀번호 칸에 키보드로 직접 칠 수 있다 (실제 키 입력)', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#pw').pressSequentially('900000');          // 진짜 키보드처럼 한 글자씩
+  expect(await page.locator('#pw').inputValue()).toBe('900000');
+  await page.locator('#pw').press('Enter');                       // 엔터로 제출
+  await expect(page.locator('#pwMsg')).toContainText('맞지 않아요');
+  expect(await page.locator('#pw').inputValue()).toBe('');        // 틀리면 칸이 비워진다
+  await page.locator('#pw').pressSequentially(EDIT_PW);
+  await page.locator('#pw').press('Enter');
+  await expect(page.locator('#v-dashboard')).toBeVisible();
+});

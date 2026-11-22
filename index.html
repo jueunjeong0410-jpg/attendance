@@ -249,8 +249,12 @@ function renderLogin(box){
   <input type="password" id="pw" autocomplete="current-password" placeholder="비밀번호 입력"></div>
   <div class="actions"><button class="btn" id="pwGo">들어가기</button><span class="note" id="pwMsg"></span></div>
   <p class="note">한 번 들어오면 이 기기에서는 로그인이 유지돼요. 공용 기기라면 다 쓴 뒤 로그아웃해 주세요.</p></div>`;
-  const go=async()=>{$('#pwGo').disabled=true;try{await store.login($('#pw').value.trim())}catch(e){$('#pwMsg').textContent=/invalid|wrong|password/.test(e.code||'')?'비밀번호가 맞지 않아요':'로그인 실패: 잠시 후 다시 시도하세요';$('#pwGo').disabled=false}};
-  $('#pwGo').onclick=go;$('#pw').onkeydown=e=>e.key==='Enter'&&go();
+  const go=async()=>{$('#pwGo').disabled=true;try{await store.login($('#pw').value.trim())}catch(e){
+    const c=e.code||'';$('#pwMsg').textContent=/invalid|wrong|password/.test(c)?'비밀번호가 맞지 않아요':/too-many/.test(c)?'여러 번 틀려서 잠시 막혔어요. 몇 분 뒤 다시 해 주세요':'로그인 실패: 잠시 후 다시 시도하세요';
+    $('#pw').value='';$('#pw').focus();$('#pwGo').disabled=false}};
+  $('#pwGo').onclick=go;
+  // 주의: 엔터일 때만 제출. (예전 코드는 엔터가 아닌 키를 모두 막아서 글자가 안 쳐졌음)
+  $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)go()});
 }
 function renderCheck(){
   const box=$('#checkBody');
