@@ -91,3 +91,10 @@ test('시트 신호: 오류가 나도 잠금을 풀고 error', () => {
   const c = webAppCtx(true, true);
   expect(c.doPost({})).toBe('error'); expect(c.released).toBe(1);
 });
+
+test('시트: 같은 목장이 이어지는 행은 병합 범위로 묶인다', () => {
+  const { groupRuns, values } = buildGrid(groups, records);
+  // 1목장 3명(3~5번째 줄, 0부터 2~4), 2목장 1명
+  expect(groupRuns).toEqual([{ start: 2, span: 3 }, { start: 5, span: 1 }]);
+  groupRuns.forEach(g => { for (let i = 0; i < g.span; i++) expect(values[g.start + i][0]).toBe(values[g.start][0]); });
+});
