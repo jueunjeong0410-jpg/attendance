@@ -130,3 +130,31 @@ test('이름에 코드를 넣어도 실행되지 않는다 (보안)', async ({ p
   await expect(page.locator('.detail')).toContainText(evil);
   expect(await page.evaluate(() => window.__hacked)).toBeUndefined();
 });
+
+test('꾹 누르면 △(예배만), 다시 짧게 누르면 결석이 된다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자', '나하늘', '다소망']);
+  await page.click('.m[data-n="가목자"]');                 // 짧게 → O
+  const target = page.locator('.m[data-n="나하늘"]');
+  await target.hover();
+  await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up();   // 꾹 → △
+  await expect(target).toHaveAttribute('aria-pressed', 'mixed');
+  await expect(target.locator('.dot')).toHaveText('△');
+  await expect(page.locator('.m[data-n="가목자"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#cnt')).toContainText('2 / 3명 출석');
+  await expect(page.locator('#cnt')).toContainText('O 1 · △ 1');
+
+  await page.click('#submit');
+  await page.goto('/#dashboard');
+  await expect(page.locator('#tTotal')).toContainText('2');        // 예배 출석 = O + △
+  await expect(page.locator('#kGroup')).toHaveText('1명');         // 목장모임 = O만
+  await page.click('[data-open]');
+  await expect(page.locator('.detail')).toContainText('예배만 △ 1명');
+  await expect(page.locator('.detail')).toContainText('결석 1명');
+
+  await page.goto('/#check');
+  const again = page.locator('.m[data-n="나하늘"]');
+  await expect(again).toHaveAttribute('aria-pressed', 'mixed');   // 저장된 △가 다시 보임
+  await again.click();                                             // 짧게 → 결석
+  await expect(again).toHaveAttribute('aria-pressed', 'false');
+});

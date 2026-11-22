@@ -82,6 +82,10 @@ textarea{min-height:200px;resize:vertical}
 .m .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;color:transparent}
 .m[aria-pressed=true]{border-color:var(--green);background:var(--green2)}
 .m[aria-pressed=true] .dot{background:var(--green);border-color:var(--green);color:var(--onG)}
+.m{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.m[aria-pressed=mixed]{border-color:var(--wheat);background:light-dark(#fff4dd,#3a2e12)}
+.m[aria-pressed=mixed] .dot{background:var(--wheat);border-color:var(--wheat);color:#14201a}
+.chip.w{background:light-dark(#fff4dd,#3a2e12)}
 .m em{font-style:normal;font-size:11px;color:var(--wheat);font-weight:900}
 .sticky{position:sticky;bottom:0;background:var(--bg);padding:12px 0 calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
 .sticky b{font-size:20px}
@@ -115,6 +119,7 @@ textarea{min-height:200px;resize:vertical}
       <div><div class="big" id="tTotal">0<span> / 0명</span></div><div class="note" id="tRate"></div></div>
       <div class="kpis">
         <div class="kpi"><span>제출한 목장</span><b id="kSub">0 / 0</b></div>
+        <div class="kpi"><span>목장모임 참석</span><b id="kGroup">0명</b></div>
         <div class="kpi"><span>새가족 출석</span><b id="kNew">0명</b></div>
         <div class="kpi"><span>방문자</span><b id="kGuest">0명</b></div>
       </div>
@@ -205,21 +210,23 @@ const errMsg=e=>e?.code==='permission-denied'?'권한이 없어요. 다시 로�
 /* ---------- 대시보드 ---------- */
 function stats(g){
   const a=att[g.id];
-  if(a)return{sub:true,present:a.present||[],absent:a.absent||[],newP:a.newPresent||[],guests:a.guests||[],total:(a.present||[]).length+(a.absent||[]).length,a};
-  return{sub:false,present:[],absent:[],newP:[],guests:[],total:(g.members||[]).length,a:null};
+  // present = 목장모임까지 참석(O), worship = 예배만(△), absent = 결석(X)
+  if(a){const o=a.present||[],w=a.worship||[],x=a.absent||[];return{sub:true,present:o,worship:w,came:o.length+w.length,absent:x,newP:a.newPresent||[],guests:a.guests||[],total:o.length+w.length+x.length,a}}
+  return{sub:false,present:[],worship:[],came:0,absent:[],newP:[],guests:[],total:(g.members||[]).length,a:null};
 }
 function renderDash(){
-  const gs=sorted();let P=0,T=0,N=0,G=0,S=0;
-  $('#rows').innerHTML=gs.map(g=>{const s=stats(g);P+=s.present.length;T+=s.total;N+=s.newP.length;G+=s.guests.length;S+=s.sub?1:0;
-    const pct=s.total?Math.round(s.present.length/s.total*100):0,isOpen=open.has(g.id);
+  const gs=sorted();let P=0,T=0,N=0,G=0,S=0,M=0;
+  $('#rows').innerHTML=gs.map(g=>{const s=stats(g);P+=s.came;M+=s.present.length;T+=s.total;N+=s.newP.length;G+=s.guests.length;S+=s.sub?1:0;
+    const pct=s.total?Math.round(s.came/s.total*100):0,isOpen=open.has(g.id);
     const when=s.a?.submittedAt?new Date(s.a.submittedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
     const chip=(n,c='')=>`<span class="chip ${c}">${esc(n)}</span>`;
     return `<div class="row"><button data-open="${esc(g.id)}" aria-expanded="${isOpen}">
       <span class="rname">${esc(g.name)}<small>목자 ${esc(g.leader||'-')}</small>${s.sub?'<span class="badge ok">제출</span>':'<span class="badge no">미제출</span>'}</span>
-      <span class="rnum">${s.sub?s.present.length:'–'}<small> / ${s.total}명</small></span>
+      <span class="rnum">${s.sub?s.came:'–'}<small> / ${s.total}명</small></span>
       <span class="bar"><i style="width:${pct}%"></i></span></button>
       ${!isOpen?'':`<div class="detail">${s.sub?`
-        <h3>출석 ${s.present.length}명</h3><div class="chips">${s.present.map(n=>s.newP.includes(n)?chip(n+' · 새가족','p n'):chip(n,'p')).join('')||'<span class="note">없음</span>'}</div>
+        <h3>출석 ${s.came}명 · 목장모임까지 O ${s.present.length}명</h3><div class="chips">${s.present.map(n=>s.newP.includes(n)?chip(n+' · 새가족','p n'):chip(n,'p')).join('')||'<span class="note">없음</span>'}</div>
+        ${s.worship.length?`<h3>예배만 △ ${s.worship.length}명</h3><div class="chips">${s.worship.map(n=>chip(n+(s.newP.includes(n)?' · 새가족':''),'w')).join('')}</div>`:''}
         <h3>결석 ${s.absent.length}명</h3><div class="chips">${s.absent.map(n=>chip(n)).join('')||'<span class="note">없음</span>'}</div>
         ${s.guests.length?`<h3>방문자 ${s.guests.length}명</h3><div class="chips">${s.guests.map(n=>chip(n,'n')).join('')}</div>`:''}
         ${s.a.note?`<h3>메모</h3><div>${esc(s.a.note)}</div>`:''}
@@ -228,7 +235,7 @@ function renderDash(){
     ||`<div class="empty">${loaded?'아직 목장이 없어요. ‘출석체크’ 탭에서 목장을 만들어 주세요.':'불러오는 중…'}</div>`;
   $('#tTotal').innerHTML=`${P}<span> / ${T}명</span>`;
   const r=T?Math.round(P/T*100):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`;$('#tMeter').style.width=r+'%';
-  $('#kSub').textContent=`${S} / ${gs.length}`;$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
+  $('#kSub').textContent=`${S} / ${gs.length}`;$('#kGroup').textContent=M+'명';$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
   document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const id=b.dataset.open;open.has(id)?open.delete(id):open.add(id);renderDash()});
 }
 
@@ -273,25 +280,37 @@ function renderCheck(){
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
       try{await store.delGroup(g.id);editing=false;gid='';toast('삭제했어요')}catch(e){toast(errMsg(e))}};
   }else{
-    if(!draft||draft.gid!==g.id)draft={gid:g.id,present:new Set(a?a.present:[]),guests:(a?.guests||[]).join(', '),note:a?.note||'',by:a?.by||ls.get('by')||g.leader||''};
+    // 상태: 'O' = 목장모임까지 참석, 'W' = 예배만(△), '' = 결석(X)
+    if(!draft||draft.gid!==g.id){const st=new Map();(a?.present||[]).forEach(n=>st.set(n,'O'));(a?.worship||[]).forEach(n=>st.set(n,'W'));
+      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),note:a?.note||'',by:a?.by||ls.get('by')||g.leader||''}}
+    const S=n=>draft.st.get(n)||'';
+    const cntText=()=>{let o=0,w=0;ms.forEach(m=>{const v=S(m.name);if(v==='O')o++;else if(v==='W')w++});return `<b>${o+w}</b> / ${ms.length}명 출석 <span class="note">(O ${o} · △ ${w})</span>`};
+    const paint=(b,n)=>{const v=S(n);b.setAttribute('aria-pressed',v==='O'?'true':v==='W'?'mixed':'false');b.querySelector('.dot').textContent=v==='W'?'△':'✓';$('#cnt').innerHTML=cntText()};
     box.innerHTML=picker+`<div class="ghead"><h2>${esc(g.name)} <span class="note">목자 ${esc(g.leader||'-')}</span></h2><button class="btn ghost sm" id="edit">명단 수정</button></div>
-    <p class="note">${a?'이미 제출된 기록이 있어요. 고쳐서 다시 제출하면 덮어써요.':ms.length?'이름을 눌러 출석을 표시하세요.':'명단이 비어 있어요. ‘명단 수정’을 눌러 이름을 넣어 주세요.'}</p>
+    <p class="note">${a?'이미 제출된 기록이 있어요. 고쳐서 다시 제출하면 덮어써요.':ms.length?'이름을 누르면 O(목장모임까지 참석), <b>꾹 누르면 △(예배만)</b>예요.':'명단이 비어 있어요. ‘명단 수정’을 눌러 이름을 넣어 주세요.'}</p>
     ${ms.length?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
-    <div class="members">${ms.map(m=>`<button class="m" data-n="${esc(m.name)}" aria-pressed="${draft.present.has(m.name)}"><span class="dot">✓</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`).join('')}</div>
+    <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
     <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
     <div class="grid2"><div class="field"><label for="by">제출자</label><input type="text" id="by" value="${esc(draft.by)}"></div>
     <div class="field"><label for="memo">메모 (선택)</label><input type="text" id="memo" value="${esc(draft.note)}" placeholder="기도제목, 결석 사유 등"></div></div>
-    <div class="sticky"><span><b id="cnt">${draft.present.size}</b> / ${ms.length}명 출석</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
+    <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
     $('#edit').onclick=()=>{editing=true;renderCheck()};
-    box.querySelectorAll('.m').forEach(b=>b.onclick=()=>{const n=b.dataset.n;draft.present.has(n)?draft.present.delete(n):draft.present.add(n);b.setAttribute('aria-pressed',draft.present.has(n));$('#cnt').textContent=draft.present.size});
-    if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.present.add(m.name));renderCheck()};$('#none').onclick=()=>{draft.present.clear();renderCheck()}}
+    // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
+    box.querySelectorAll('.m').forEach(b=>{const n=b.dataset.n;let t=null,longDone=false;
+      const cancel=()=>{clearTimeout(t);t=null};
+      b.addEventListener('pointerdown',()=>{longDone=false;cancel();t=setTimeout(()=>{longDone=true;draft.st.set(n,'W');paint(b,n);if(navigator.vibrate)try{navigator.vibrate(30)}catch(e){}},500)});
+      ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,cancel));
+      b.addEventListener('contextmenu',e=>e.preventDefault());
+      b.addEventListener('click',()=>{if(longDone){longDone=false;return}draft.st.set(n,S(n)==='O'?'':S(n)==='W'?'':'O');paint(b,n)});
+    });
+    if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
     $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;$('#by').oninput=e=>draft.by=e.target.value;
     $('#submit').onclick=async e=>{e.target.disabled=true;
-      const has=m=>draft.present.has(m.name);
-      const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(has).map(m=>m.name),absent:ms.filter(m=>!has(m)).map(m=>m.name),
-        newPresent:ms.filter(m=>m.isNew&&has(m)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
+      const is=v=>m=>S(m.name)===v;
+      const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
+        newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
         note:draft.note.trim(),by:draft.by.trim(),submittedAt:new Date().toISOString()};
-      try{await store.setAtt(`${date}_${g.id}`,rec);ls.set('by',rec.by);toast(`${g.name} ${rec.present.length}명 제출 완료`);draft=null;render()}
+      try{await store.setAtt(`${date}_${g.id}`,rec);ls.set('by',rec.by);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
       catch(err){toast(errMsg(err));e.target.disabled=false}};
   }
   box.querySelectorAll('.gp').forEach(b=>b.onclick=()=>{gid=b.dataset.g;ls.set('gid',gid);draft=null;editing=false;renderCheck()});
