@@ -47,6 +47,29 @@ function updateAttendanceSheet() {
   writeSheet_(buildGrid(groups, records));
 }
 
+/* ---------- 앱에서 저장하면 바로 업데이트 (웹 앱 신호) ----------
+ * 앱이 출석·명단을 저장한 직후 이 스크립트의 웹 앱 주소로 "업데이트해 줘" 신호만 보내요.
+ * 신호에는 데이터가 전혀 없고, 시트는 언제나 Firebase에서 직접 읽어 와요.
+ * 그래서 누가 이 주소를 알아도 할 수 있는 일은 '시트 새로고침'뿐이에요.
+ * 여러 목장이 동시에 제출해도 한 번에 하나씩 차례로 처리해요(잠금).
+ */
+function doPost(e) { return runUpdateSafely_(); }
+function doGet(e) { return runUpdateSafely_(); }
+
+function runUpdateSafely_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return ContentService.createTextOutput('busy');
+  try {
+    updateAttendanceSheet();
+    return ContentService.createTextOutput('ok');
+  } catch (err) {
+    console.error(err);
+    return ContentService.createTextOutput('error');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ---------- Firebase 읽기 ---------- */
 function signIn_(p) {
   var res = UrlFetchApp.fetch(
@@ -178,7 +201,19 @@ function buildGrid(groups, records) {
     values.push(line);
   });
 
-  return { values: values, width: width, months: blocks.map(function (b) { return { col: b.col, span: b.dates.length, title: header1[b.col] }; }) };
+  // 같은 목장이 이어지는 행 묶음 (A열 병합용). start는 values 안의 행 번호(0부터)
+  var groupRuns = [];
+  rows.forEach(function (row, i) {
+    var last = groupRuns[groupRuns.length - 1];
+    if (last && last.gid === row.gid) last.span++;
+    else groupRuns.push({ gid: row.gid, start: i + 2, span: 1 });
+  });
+
+  return {
+    values: values, width: width,
+    months: blocks.map(function (b) { return { col: b.col, span: b.dates.length, title: header1[b.col] }; }),
+    groupRuns: groupRuns.map(function (g) { return { start: g.start, span: g.span }; })
+  };
 }
 
 /* ---------- 시트에 쓰기 ---------- */
@@ -200,6 +235,12 @@ function writeSheet_(grid) {
     r.setHorizontalAlignment('center').setFontWeight('bold').setBackground('#1f5c3f').setFontColor('#ffffff');
   });
   sh.getRange(2, 1, 1, cols).setFontWeight('bold').setBackground('#f3f6f2').setHorizontalAlignment('center');
+  // 같은 목장명은 A열에서 세로로 합쳐서 보기 편하게
+  grid.groupRuns.forEach(function (g) {
+    var r = sh.getRange(g.start + 1, 1, g.span, 1);
+    if (g.span > 1) r.merge();
+    r.setVerticalAlignment('middle').setHorizontalAlignment('center').setFontWeight('bold');
+  });
   sh.setFrozenRows(2); sh.setFrozenColumns(2);
   sh.setColumnWidth(1, 110); sh.setColumnWidth(2, 80);
   if (cols > 2) sh.setColumnWidths(3, cols - 2, 46);
