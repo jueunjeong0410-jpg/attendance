@@ -130,3 +130,24 @@ test('시트: 방문자 수 기록을 켠 목장만 방문자 수 줄이 생긴�
   expect(groupRuns[1].span).toBe(2);                        // 목장명 병합에 방문자 줄 포함
   expect(values[2][col('11/22')]).toBe(2);                  // 총 참석에는 방문자 미포함
 });
+
+test('연도별 시트: 기록이 있는 연도 + 올해, 최신 연도부터', () => {
+  const rs = [{ date: '2025-12-28' }, { date: '2026-01-04' }, { date: '2026-11-22' }];
+  expect(JSON.parse(JSON.stringify(ctx.yearsToWrite(rs, 2026)))).toEqual([2026, 2025]);
+  expect(JSON.parse(JSON.stringify(ctx.yearsToWrite([], 2027)))).toEqual([2027]);          // 기록 없어도 올해 시트
+  expect(JSON.parse(JSON.stringify(ctx.yearsToWrite(rs, 2027)))).toEqual([2027, 2026, 2025]);
+  expect(ctx.sheetNameForYear(2026)).toBe('2026 출석현황');
+});
+
+test('연도별 시트: 그 해 기록만 표에 들어가고 제목에 연도가 붙는다', () => {
+  const rs = [
+    { date: '2025-12-28', gid: 'g01', present: ['가목자'], absent: [] },
+    { date: '2026-01-04', gid: 'g01', present: [], absent: ['가목자'] },
+  ];
+  const y26 = rs.filter(r => r.date.startsWith('2026'));
+  const { values, months } = buildGrid(groups, y26.length ? y26 : [], );
+  expect(months.map(m => m.title)).toEqual(['2026년 1월']);
+  const titled = JSON.parse(JSON.stringify(ctx.buildGrid(groups, y26, '2026년 청년부 출석')));
+  expect(titled.values[0][0]).toBe('2026년 청년부 출석');
+  expect(values[1]).not.toContain('12/28');
+});

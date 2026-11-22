@@ -1,7 +1,7 @@
 /**
  * 청년부 출석 → 구글 시트 자동 기록 (Google Apps Script)
  *
- * 하는 일: 앱(Firebase)에 저장된 출석 기록을 읽어서 '출석현황' 시트에 월별 표로 적어요.
+ * 하는 일: 앱(Firebase)에 저장된 출석 기록을 읽어서 연도별 시트('2026 출석현황' 등)에 월별 표로 적어요.
  *   - 왼쪽: A열 목장, B열 이름 (고정)
  *   - 오른쪽: 월별 표가 이어지고, 달과 달 사이는 한 열 비워요
  *   - O = 목장모임까지 참석, △ = 예배만, X = 결석, 빈칸 = 그 주 기록 없음
@@ -14,10 +14,10 @@
  *     VIEWER_EMAIL         보기 계정 이메일 (예: viewer@youth.app)
  *     VIEWER_PASSWORD      보기 계정 비밀번호
  *
- * 주의: '출석현황' 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
+ * 주의: 연도별 출석현황 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
  */
 
-var SHEET_NAME = '출석현황';
+var SHEET_NAME = '출석현황';   // 연도별 시트 이름: '2026 출석현황' 처럼 앞에 연도가 붙어요
 var FIRST_DATA_COL = 2;   // 0부터 셈: 0=A(목장), 1=B(이름), 2=C부터 날짜
 var HEADER_ROWS = 3;      // 1줄: 월, 2줄: 날짜, 3줄: 총 참석
 
@@ -46,7 +46,26 @@ function updateAttendanceSheet() {
   var token = signIn_(p);
   var groups = listDocs_(p, token, 'groups');
   var records = listDocs_(p, token, 'attendance');
-  writeSheet_(buildGrid(groups, records));
+  var thisYear = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy'));
+  var ss = SpreadsheetApp.getActive();
+  // 예전 '출석현황' 시트가 있으면 지우지 않고 올해 시트 이름으로 바꿔 써요
+  var old = ss.getSheetByName(SHEET_NAME);
+  if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
+  yearsToWrite(records, thisYear).forEach(function (y, i) {
+    var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
+    var sh = writeSheet_(buildGrid(groups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
+    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);   // 최신 연도가 맨 앞
+  });
+}
+
+/* ---------- 연도별 시트 ---------- */
+function sheetNameForYear(y) { return y + ' ' + SHEET_NAME; }
+
+// 기록이 있는 연도 + 올해(기록이 없어도 빈 표를 만들어 둠), 최신 연도부터
+function yearsToWrite(records, thisYear) {
+  var ys = {}; ys[thisYear] = true;
+  records.forEach(function (r) { var y = Number(String(r.date || '').slice(0, 4)); if (y) ys[y] = true; });
+  return Object.keys(ys).map(Number).sort(function (a, b) { return b - a; });
 }
 
 /* ---------- 앱에서 저장하면 바로 업데이트 (웹 앱 신호) ----------
@@ -131,7 +150,7 @@ function sundaysOfMonth_(ym) {
   return out;
 }
 
-function buildGrid(groups, records) {
+function buildGrid(groups, records, title) {
   var sorted = groups.slice().sort(function (a, b) {
     var oa = a.order == null ? 99 : a.order, ob = b.order == null ? 99 : b.order;
     return oa - ob || String(a.name).localeCompare(String(b.name), 'ko', { numeric: true });
@@ -183,7 +202,7 @@ function buildGrid(groups, records) {
   blocks.forEach(function (b, i) { b.col = width; width += b.dates.length + (i < blocks.length - 1 ? 1 : 0); });
 
   var header1 = new Array(width).fill(''), header2 = new Array(width).fill(''), header3 = new Array(width).fill('');
-  header1[0] = '청년부 출석현황'; header2[0] = '목장'; header2[1] = '이름';
+  header1[0] = title || '청년부 출석현황'; header2[0] = '목장'; header2[1] = '이름';
   header3[0] = '전체'; header3[1] = '총 참석';
   blocks.forEach(function (b) {
     header1[b.col] = b.ym.slice(0, 4) + '년 ' + Number(b.ym.slice(5, 7)) + '월';
@@ -233,9 +252,9 @@ function buildGrid(groups, records) {
 }
 
 /* ---------- 시트에 쓰기 ---------- */
-function writeSheet_(grid) {
+function writeSheet_(grid, sheetName) {
   var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+  var sh = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
   sh.clear(); sh.clearConditionalFormatRules();
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
 
@@ -273,4 +292,5 @@ function writeSheet_(grid) {
     };
     sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('X', '#fbe3dc', '#b3402a')]);
   }
+  return sh;
 }
