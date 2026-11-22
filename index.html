@@ -136,15 +136,17 @@ textarea{min-height:200px;resize:vertical}
 <div class="toast" id="toast"></div>
 
 <script type="module">
-/* ================= 설정: Firebase 값을 여기에 붙여 넣으세요 ================= */
+/* ================= 설정: Firebase 프로젝트 (youth-attendance) ================= */
 const firebaseConfig = {
-  apiKey: "여기에_붙여넣기",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyAErq67jqfL37f63R-Ei94UjRFSS77SCvk",
+  authDomain: "youth-attendance-7a450.firebaseapp.com",
+  projectId: "youth-attendance-7a450",
+  storageBucket: "youth-attendance-7a450.firebasestorage.app",
+  messagingSenderId: "235525226164",
+  appId: "1:235525226164:web:be2bc56106f09c2875e1e1"
 };
+// 참고: 위 값은 비밀번호가 아니라 '어느 Firebase 프로젝트인지' 알려 주는 주소예요.
+// 공개돼도 괜찮고, 실제 보호는 firestore.rules(보안 규칙)와 로그인이 맡아요.
 const EDITOR_EMAIL = "editor@youth.app";   // 편집 계정 (목자용)
 const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (부장님·팀장·목사님용)
 /* ========================================================================== */
