@@ -165,7 +165,7 @@ const FB='https://www.gstatic.com/firebasejs/10.12.2/';
 const DEMO=!firebaseConfig.projectId;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const toast=t=>{const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200)};
+const toast=(t,ms=2200)=>{const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),ms)};
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
 /* ---------- 저장소 (Firebase 또는 체험 모드) ---------- */
@@ -353,7 +353,12 @@ function render(){
   if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));return}
   document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   if(view==='dashboard')renderDash();else if(!typing())renderCheck();
+  sheetBtn();
 }
+/* 구글 시트 버튼: 편집 권한일 때만 링크를 걸고, 보기 권한이면 안내만 띄워요 */
+function sheetBtn(){const a=$('#sheetLink');if(!SHEET_URL)return;a.hidden=false;
+  if(role==='edit')a.href=SHEET_URL;else a.removeAttribute('href');
+  a.setAttribute('role','button');a.tabIndex=0}
 const route=()=>{view=location.hash==='#check'?'check':'dashboard';render()};
 addEventListener('hashchange',route);
 
@@ -371,7 +376,8 @@ function subAll(){
 }
 store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});
 $('#logoutD').onclick=()=>store.logout();
-if(SHEET_URL){$('#sheetLink').href=SHEET_URL;$('#sheetLink').hidden=false}
+$('#sheetLink').onclick=e=>{if(role!=='edit'){e.preventDefault();toast('뷰어 기능에선 지원하지 않는 기능입니다.',3000)}};
+$('#sheetLink').onkeydown=e=>{if(e.key==='Enter'&&role!=='edit')$('#sheetLink').click()};
 route();
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
