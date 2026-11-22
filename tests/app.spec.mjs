@@ -230,3 +230,29 @@ test('메모가 하나도 없으면 안내 문구가 보인다', async ({ page }
   await login(page, VIEW_PW);
   await expect(page.locator('#memos')).toContainText('메모가 없어요');
 });
+
+test('방문자 수 기록을 켠 목장만 방문자를 숫자로 적을 수 있고, 대시보드에 반영된다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자']);                                   // 1번째 목장: 설정 끔
+  await expect(page.locator('#guestN')).toHaveCount(0);
+
+  await page.click('.gp >> nth=1');                                      // 2번째 목장: 설정 켬
+  await page.click('#edit');
+  await page.fill('#en', '가짜 새가족목장');
+  await page.fill('#em', '나하늘');
+  await page.check('#ecg');
+  await page.click('#eSave');
+  await expect(page.locator('#guestN')).toBeVisible();
+  await page.click('#all');
+  await page.locator('#guestN').fill('5');
+  await page.click('#submit');
+
+  await page.goto('/#dashboard');
+  await expect(page.locator('#kGuest')).toHaveText('5명');
+  await expect(page.locator('#tTotal')).toContainText('1');             // 방문자는 출석 인원에 안 섞임
+
+  await page.goto('/#check');                                            // 다시 열면 저장한 숫자가 보임
+  await expect(page.locator('#guestN')).toHaveValue('5');
+  await page.click('#edit');
+  await expect(page.locator('#ecg')).toBeChecked();
+});
