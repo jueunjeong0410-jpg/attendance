@@ -6,7 +6,6 @@
  *   - 오른쪽: 월별 표가 이어지고, 달과 달 사이는 한 열 비워요
  *   - O = 목장모임까지 참석, △ = 예배만, X = 결석, 빈칸 = 그 주 기록 없음
  *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), 4번째 줄: 날짜별 방문자 수 합계
- *   - '방문자 수 기록'을 켠 목장은 명단 아래 방문자 수 줄 추가
  *
  * 설정 (코드에는 비밀번호를 적지 않아요):
  *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성에 4개를 넣어 주세요.
@@ -85,8 +84,9 @@ function runUpdateSafely_() {
     updateAttendanceSheet();
     return ContentService.createTextOutput('ok');
   } catch (err) {
+    // 오류를 숨기지 않고 다시 던져서, Apps Script '실행' 기록에 '실패'로 보이게 해요
     console.error(err);
-    return ContentService.createTextOutput('error');
+    throw err;
   } finally {
     lock.releaseLock();
   }
@@ -167,7 +167,7 @@ function buildGrid(groups, records, title) {
 
   // 행: 목장 순서대로 현재 명단 + (명단에서 빠졌지만 기록에 있는 사람)
   var rows = [], seenGroup = {};
-  function addGroup(gid, name, roster, countGuests) {
+  function addGroup(gid, name, roster) {
     seenGroup[gid] = true;
     var names = roster.slice(), have = {};
     names.forEach(function (n) { have[n] = true; });
@@ -178,11 +178,9 @@ function buildGrid(groups, records, title) {
       });
     });
     names.forEach(function (n) { rows.push({ gid: gid, group: name, name: n }); });
-    // '방문자 수 기록'을 켠 목장은 맨 아래에 방문자 수 줄을 더해요
-    if (countGuests) rows.push({ gid: gid, group: name, name: '방문자 수', guest: true });
   }
   sorted.forEach(function (g) {
-    addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }), g.countGuests === true);
+    addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }));
   });
   // 삭제된 목장이라도 기록이 있으면 아래에 남겨요
   records.forEach(function (r) {
@@ -211,12 +209,12 @@ function buildGrid(groups, records, title) {
     b.dates.forEach(function (d, j) {
       header2[b.col + j] = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10));
       // 총 참석 = 그날 제출된 모든 목장의 O + △ (방문자는 빼고, 대시보드 숫자와 같아요)
-      // 방문자 수 = 그날 모든 목장의 방문자(숫자로 적은 값과 이름 개수 중 큰 값) 합계
+      // 방문자 수 = 그날 모든 목장이 적은 방문자 이름 수의 합계
       var total = 0, guests = 0, any = false;
       records.forEach(function (r) {
         if (r.date !== d) return;
         any = true; total += (r.present || []).length + (r.worship || []).length;
-        guests += Math.max(Number(r.guestCount) || 0, (r.guests || []).length);
+        guests += (r.guests || []).length;
       });
       header3[b.col + j] = any ? total : '';
       header4[b.col + j] = any ? guests : '';
@@ -231,7 +229,6 @@ function buildGrid(groups, records, title) {
       b.dates.forEach(function (d, j) {
         var r = byKey[d + '|' + row.gid];
         if (!r) return;
-        if (row.guest) { line[b.col + j] = Math.max(Number(r.guestCount) || 0, (r.guests || []).length); return; }
         if ((r.present || []).indexOf(row.name) >= 0) line[b.col + j] = 'O';
         else if ((r.worship || []).indexOf(row.name) >= 0) line[b.col + j] = '△';
         else if ((r.absent || []).indexOf(row.name) >= 0) line[b.col + j] = 'X';
@@ -251,8 +248,7 @@ function buildGrid(groups, records, title) {
   return {
     values: values, width: width,
     months: blocks.map(function (b) { return { col: b.col, span: b.dates.length, title: header1[b.col] }; }),
-    groupRuns: groupRuns.map(function (g) { return { start: g.start, span: g.span }; }),
-    guestRows: rows.map(function (row, i) { return row.guest ? i + HEADER_ROWS : -1; }).filter(function (i) { return i >= 0; })
+    groupRuns: groupRuns.map(function (g) { return { start: g.start, span: g.span }; })
   };
 }
 
@@ -262,6 +258,8 @@ function writeSheet_(grid, sheetName) {
   var sh = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
   sh.clear(); sh.clearConditionalFormatRules();
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  // 고정된 줄과 고정 안 된 줄은 병합할 수 없어서, 먼저 고정을 풀고 맨 끝에 다시 고정해요
+  sh.setFrozenRows(0); sh.setFrozenColumns(0);
 
   var v = grid.values, rows = v.length, cols = Math.max(grid.width, 2);
   if (sh.getMaxColumns() < cols) sh.insertColumnsAfter(sh.getMaxColumns(), cols - sh.getMaxColumns());
@@ -278,9 +276,6 @@ function writeSheet_(grid, sheetName) {
   sh.getRange(3, 1, 1, cols).setFontWeight('bold').setBackground('#cfe6d6').setFontColor('#1f5c3f').setHorizontalAlignment('center');
   sh.getRange(4, 1, 1, cols).setFontWeight('bold').setBackground('#fff4dd').setFontColor('#8a5a00').setHorizontalAlignment('center');
   sh.getRange(3, 1, 2, 1).merge().setVerticalAlignment('middle');   // A3:A4 '전체' 한 칸
-  grid.guestRows.forEach(function (i) {
-    sh.getRange(i + 1, 2, 1, cols - 1).setBackground('#fff4dd').setFontColor('#8a5a00').setFontWeight('bold').setHorizontalAlignment('center');
-  });
   // 같은 목장명은 A열에서 세로로 합쳐서 보기 편하게
   grid.groupRuns.forEach(function (g) {
     var r = sh.getRange(g.start + 1, 1, g.span, 1);

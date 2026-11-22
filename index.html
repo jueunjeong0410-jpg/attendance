@@ -25,7 +25,6 @@ button{cursor:pointer}
 .top{position:sticky;top:0;z-index:5;background:var(--green);color:#fff;padding:calc(12px + env(safe-area-inset-top)) max(4vw,14px) 0}
 .top h1{margin:0;font-size:20px;font-weight:900;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .top h1 small{font-size:13px;font-weight:500;opacity:.85}
-.top h1 .credit{font-size:12px;font-weight:400;opacity:.75;letter-spacing:.02em}
 .date{display:flex;align-items:center;gap:6px;margin:10px 0}
 .date button{width:44px;height:44px;border-radius:10px;border:0;background:rgb(255 255 255/.15);color:#fff;font-size:18px}
 .date input{flex:1;height:44px;border-radius:10px;border:0;padding:0 12px;background:#fff;color:#14201a;font-size:16px;font-weight:700}
@@ -71,7 +70,6 @@ textarea{min-height:200px;resize:vertical}
 .btn.danger{background:var(--red);color:#fff}
 .btn.sm{min-height:36px;padding:0 12px;font-size:14px}
 .btn:disabled{opacity:.5;cursor:default}
-.check{display:flex;gap:8px;align-items:flex-start;margin:0 0 14px;font-size:15px;font-weight:700}.check input{width:20px;height:20px;margin-top:2px;flex:none}
 .memos{display:grid;gap:8px}.memo{border:1px solid var(--line);border-radius:14px;padding:12px 16px}.memo p{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 textarea#memo{min-height:84px}
 .sheetlink{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
@@ -106,7 +104,7 @@ textarea#memo{min-height:84px}
 </head>
 <body>
 <header class="top">
-  <h1>청년부 출석 <small class="credit">Made by 정주은</small></h1>
+  <h1>강서성결교회 청년부 출석부</h1>
   <div class="date">
     <button id="prev" aria-label="지난 주일">◀</button>
     <input type="date" id="date" aria-label="날짜">
@@ -233,7 +231,7 @@ const errMsg=e=>e?.code==='permission-denied'?'권한이 없어요. 다시 로�
 function stats(g){
   const a=att[g.id];
   // present = 목장모임까지 참석(O), worship = 예배만(△), absent = 결석(X)
-  if(a){const o=a.present||[],w=a.worship||[],x=a.absent||[];return{sub:true,present:o,worship:w,came:o.length+w.length,absent:x,newP:a.newPresent||[],guests:a.guests||[],guestN:Math.max(Number(a.guestCount)||0,(a.guests||[]).length),total:o.length+w.length+x.length,a}}
+  if(a){const o=a.present||[],w=a.worship||[],x=a.absent||[];return{sub:true,present:o,worship:w,came:o.length+w.length,absent:x,newP:a.newPresent||[],guests:a.guests||[],guestN:(a.guests||[]).length,total:o.length+w.length+x.length,a}}
   return{sub:false,present:[],worship:[],came:0,absent:[],newP:[],guests:[],guestN:0,total:(g.members||[]).length,a:null};
 }
 function renderDash(){
@@ -301,17 +299,16 @@ function renderCheck(){
       <div class="field"><label for="el">목자</label><input type="text" id="el" value="${esc(g.leader||'')}"></div></div>
       <div class="field"><label for="em">명단 · 한 줄에 한 명, 새가족은 이름 뒤에 *</label><textarea id="em" placeholder="김하늘&#10;이소망&#10;박은혜*">${esc(memberText(ms))}</textarea></div>
       <div class="field" style="max-width:160px"><label for="eo">표시 순서</label><input type="number" id="eo" value="${g.order??''}"></div>
-      <label class="check"><input type="checkbox" id="ecg"${g.countGuests?' checked':''}><span>방문자를 숫자로도 기록<span class="note" style="display:block;font-weight:400;margin:2px 0 0">출석체크에 '방문자 수' 칸이 생기고, 시트에 방문자 수 줄이 추가돼요</span></span></label>
       <div class="actions"><button class="btn" id="eSave">저장</button><button class="btn ghost" id="eCancel">취소</button><button class="btn ghost" id="eDel">목장 삭제</button></div></div>`+foot;
     $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
-      try{await store.setGroup(g.id,{...g,name,leader:$('#el').value.trim(),members:parseMembers($('#em').value),order:Number($('#eo').value)||g.order||99,countGuests:$('#ecg').checked});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
+      try{await store.setGroup(g.id,{...g,name,leader:$('#el').value.trim(),members:parseMembers($('#em').value),order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
     $('#eCancel').onclick=()=>{editing=false;renderCheck()};
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
       try{await store.delGroup(g.id);editing=false;gid='';toast('삭제했어요')}catch(e){toast(errMsg(e))}};
   }else{
     // 상태: 'O' = 목장모임까지 참석, 'W' = 예배만(△), '' = 결석(X)
     if(!draft||draft.gid!==g.id){const st=new Map();(a?.present||[]).forEach(n=>st.set(n,'O'));(a?.worship||[]).forEach(n=>st.set(n,'W'));
-      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),guestN:a?.guestCount??'',note:a?.note||''}}
+      draft={gid:g.id,st,guests:(a?.guests||[]).join(', '),note:a?.note||''}}
     const S=n=>draft.st.get(n)||'';
     const cntText=()=>{let o=0,w=0;ms.forEach(m=>{const v=S(m.name);if(v==='O')o++;else if(v==='W')w++});return `<b>${o+w}</b> / ${ms.length}명 출석 <span class="note">(O ${o} · △ ${w})</span>`};
     const paint=(b,n)=>{const v=S(n);b.setAttribute('aria-pressed',v==='O'?'true':v==='W'?'mixed':'false');b.querySelector('.dot').textContent=v==='W'?'△':'✓';$('#cnt').innerHTML=cntText()};
@@ -319,8 +316,7 @@ function renderCheck(){
     <p class="note">${a?'이미 제출된 기록이 있어요. 고쳐서 다시 제출하면 덮어써요.':ms.length?'이름을 누르면 O(목장모임까지 참석), <b>꾹 누르면 △(예배만)</b>예요.':'명단이 비어 있어요. ‘명단 수정’을 눌러 이름을 넣어 주세요.'}</p>
     ${ms.length?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
     <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
-    ${g.countGuests?`<div class="field" style="max-width:200px"><label for="guestN">방문자 수</label><input type="number" id="guestN" min="0" step="1" inputmode="numeric" value="${esc(draft.guestN)}" placeholder="0"></div>`:''}
-    <div class="field"><label for="guests">방문자 ${g.countGuests?'이름 (알면 적기, 선택)':'(처음 온 사람, 쉼표로 구분)'}</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
+    <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
     <div class="field"><label for="memo">메모 (선택) · 대시보드 맨 아래에 목장별로 모여요</label><textarea id="memo" rows="3" placeholder="기도제목, 결석 사유 등">${esc(draft.note)}</textarea></div>
     <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
     $('#edit').onclick=()=>{editing=true;renderCheck()};
@@ -333,11 +329,11 @@ function renderCheck(){
       b.addEventListener('click',()=>{if(longDone){longDone=false;return}draft.st.set(n,S(n)==='O'?'':S(n)==='W'?'':'O');paint(b,n)});
     });
     if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
-    $('#guests').oninput=e=>draft.guests=e.target.value;if($('#guestN'))$('#guestN').oninput=e=>draft.guestN=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;
+    $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;
     $('#submit').onclick=async e=>{e.target.disabled=true;
       const is=v=>m=>S(m.name)===v;
       const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
-        newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),...(g.countGuests?{guestCount:Math.max(0,parseInt(draft.guestN,10)||0)}:{}),
+        newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
         note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString()};
       try{await store.setAtt(`${date}_${g.id}`,rec);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
       catch(err){toast(errMsg(err));e.target.disabled=false}};

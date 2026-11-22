@@ -87,9 +87,10 @@ test('시트 신호: 다른 업데이트가 진행 중이면 기다리다 busy',
   const c = webAppCtx(false, false);
   expect(c.doPost({})).toBe('busy'); expect(c.runs).toBe(0);
 });
-test('시트 신호: 오류가 나도 잠금을 풀고 error', () => {
+test('시트 신호: 오류가 나면 숨기지 않고 실패로 알리고, 잠금은 푼다', () => {
   const c = webAppCtx(true, true);
-  expect(c.doPost({})).toBe('error'); expect(c.released).toBe(1);
+  expect(() => c.doPost({})).toThrow();
+  expect(c.released).toBe(1);
 });
 
 test('시트: 같은 목장이 이어지는 행은 병합 범위로 묶인다', () => {
@@ -107,28 +108,6 @@ test('시트: 맨 위 3번째 줄에 날짜별 총 참석(O+△)이 나온다', 
   expect(values[2][col('11/22')]).toBe(2);   // 가목자 O + 나하늘 O
   expect(values[2][col('12/6')]).toBe(1);    // 라은혜 △
   expect(values[2][col('11/8')]).toBe('');   // 그날 제출 없음
-});
-
-test('시트: 방문자 수 기록을 켠 목장만 방문자 수 줄이 생긴다', () => {
-  const gs = [
-    { id: 'g01', name: '1목장', order: 1, members: [{ name: '가목자' }] },
-    { id: 'g02', name: '새가족목장', order: 2, members: [{ name: '나하늘' }], countGuests: true },
-  ];
-  const rs = [
-    { date: '2026-11-22', gid: 'g01', present: ['가목자'], absent: [], guests: ['가짜손님'] },
-    { date: '2026-11-22', gid: 'g02', present: ['나하늘'], absent: [], guests: [], guestCount: 4 },
-    { date: '2026-11-15', gid: 'g02', present: [], absent: ['나하늘'], guests: ['가짜1', '가짜2'] },
-  ];
-  const { values, guestRows, groupRuns } = buildGrid(gs, rs);
-  const guestLines = values.slice(4).filter(r => r[1] === '방문자 수');   // 머리글 4줄 제외, 목장 줄만
-  expect(guestLines.length).toBe(1);                       // 1목장에는 없음
-  expect(guestLines[0][0]).toBe('새가족목장');
-  const col = d => values[1].indexOf(d);
-  expect(guestLines[0][col('11/22')]).toBe(4);              // 숫자로 적은 값
-  expect(guestLines[0][col('11/15')]).toBe(2);              // 숫자가 없으면 이름 개수
-  expect(guestRows).toEqual([values.indexOf(guestLines[0])]);
-  expect(groupRuns[1].span).toBe(2);                        // 목장명 병합에 방문자 줄 포함
-  expect(values[2][col('11/22')]).toBe(2);                  // 총 참석에는 방문자 미포함
 });
 
 test('연도별 시트: 기록이 있는 연도 + 올해, 최신 연도부터', () => {
@@ -154,17 +133,24 @@ test('연도별 시트: 그 해 기록만 표에 들어가고 제목에 연도�
 
 test('시트: 총 참석 아래 4번째 줄에 날짜별 방문자 수 합계가 나온다', () => {
   const gs = [{ id: 'g01', name: '1목장', order: 1, members: [{ name: '가목자' }] },
-              { id: 'g02', name: '2목장', order: 2, members: [{ name: '나하늘' }], countGuests: true }];
+              { id: 'g02', name: '2목장', order: 2, members: [{ name: '나하늘' }] }];
   const rs = [
     { date: '2026-11-22', gid: 'g01', present: ['가목자'], absent: [], guests: ['가짜1', '가짜2'] },
-    { date: '2026-11-22', gid: 'g02', present: ['나하늘'], absent: [], guests: [], guestCount: 3 },
+    { date: '2026-11-22', gid: 'g02', present: ['나하늘'], absent: [], guests: ['가짜3', '가짜4', '가짜5'] },
     { date: '2026-11-15', gid: 'g01', present: [], absent: ['가목자'], guests: [] },
   ];
   const { values } = buildGrid(gs, rs);
   expect(values[3].slice(0, 2)).toEqual(['전체', '방문자 수']);
   const col = d => values[1].indexOf(d);
-  expect(values[3][col('11/22')]).toBe(5);    // 이름 2명 + 숫자 3명
+  expect(values[3][col('11/22')]).toBe(5);    // 1목장 2명 + 2목장 3명
   expect(values[3][col('11/15')]).toBe(0);    // 제출은 했지만 방문자 없음
   expect(values[3][col('11/8')]).toBe('');    // 제출 없음
   expect(values[2][col('11/22')]).toBe(2);    // 총 참석은 그대로 O+△
+});
+
+test('시트: 목장별 방문자 수 줄은 만들지 않는다', () => {
+  const gs = [{ id: 'g01', name: '1목장', order: 1, members: [{ name: '가목자' }], countGuests: true }];
+  const rs = [{ date: '2026-11-22', gid: 'g01', present: ['가목자'], absent: [], guests: ['가짜1'] }];
+  const { values } = buildGrid(gs, rs);
+  expect(values.slice(4).map(r => r[1])).toEqual(['가목자']);
 });
