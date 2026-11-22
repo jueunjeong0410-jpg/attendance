@@ -262,6 +262,8 @@ function writeSheet_(grid, sheetName) {
   var sh = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
   sh.clear(); sh.clearConditionalFormatRules();
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  // 고정된 줄과 고정 안 된 줄은 병합할 수 없어서, 먼저 고정을 풀고 맨 끝에 다시 고정해요
+  sh.setFrozenRows(0); sh.setFrozenColumns(0);
 
   var v = grid.values, rows = v.length, cols = Math.max(grid.width, 2);
   if (sh.getMaxColumns() < cols) sh.insertColumnsAfter(sh.getMaxColumns(), cols - sh.getMaxColumns());
