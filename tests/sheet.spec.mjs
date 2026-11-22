@@ -67,3 +67,27 @@ test('시트: 기록이 하나도 없으면 머리글만 있다', () => {
   expect(values[1]).toEqual(['목장', '이름']);
   expect(values.length).toBe(2 + 4);
 });
+
+// 웹 앱 신호(doPost): 잠금으로 한 번에 하나씩, 실패해도 잠금은 풀린다
+function webAppCtx(lockOk, updateThrows) {
+  const c = { released: 0, runs: 0 };
+  c.LockService = { getScriptLock: () => ({ tryLock: () => lockOk, releaseLock: () => { c.released++; } }) };
+  c.ContentService = { createTextOutput: t => t };
+  c.console = { error() {} };
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(here, '..', 'sheets', 'attendance-sheet.gs'), 'utf8'), c);
+  c.updateAttendanceSheet = () => { c.runs++; if (updateThrows) throw new Error('x'); };
+  return c;
+}
+test('시트 신호: 정상이면 업데이트하고 ok', () => {
+  const c = webAppCtx(true, false);
+  expect(c.doPost({})).toBe('ok'); expect(c.runs).toBe(1); expect(c.released).toBe(1);
+});
+test('시트 신호: 다른 업데이트가 진행 중이면 기다리다 busy', () => {
+  const c = webAppCtx(false, false);
+  expect(c.doPost({})).toBe('busy'); expect(c.runs).toBe(0);
+});
+test('시트 신호: 오류가 나도 잠금을 풀고 error', () => {
+  const c = webAppCtx(true, true);
+  expect(c.doPost({})).toBe('error'); expect(c.released).toBe(1);
+});

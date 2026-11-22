@@ -47,6 +47,29 @@ function updateAttendanceSheet() {
   writeSheet_(buildGrid(groups, records));
 }
 
+/* ---------- 앱에서 저장하면 바로 업데이트 (웹 앱 신호) ----------
+ * 앱이 출석·명단을 저장한 직후 이 스크립트의 웹 앱 주소로 "업데이트해 줘" 신호만 보내요.
+ * 신호에는 데이터가 전혀 없고, 시트는 언제나 Firebase에서 직접 읽어 와요.
+ * 그래서 누가 이 주소를 알아도 할 수 있는 일은 '시트 새로고침'뿐이에요.
+ * 여러 목장이 동시에 제출해도 한 번에 하나씩 차례로 처리해요(잠금).
+ */
+function doPost(e) { return runUpdateSafely_(); }
+function doGet(e) { return runUpdateSafely_(); }
+
+function runUpdateSafely_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return ContentService.createTextOutput('busy');
+  try {
+    updateAttendanceSheet();
+    return ContentService.createTextOutput('ok');
+  } catch (err) {
+    console.error(err);
+    return ContentService.createTextOutput('error');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ---------- Firebase 읽기 ---------- */
 function signIn_(p) {
   var res = UrlFetchApp.fetch(
