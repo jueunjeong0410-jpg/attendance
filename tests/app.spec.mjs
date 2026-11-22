@@ -1,0 +1,132 @@
+// 청년부 출석 앱 핵심 기능 테스트
+// - 모든 테스트는 '체험 모드'(브라우저 안에만 저장)로 돌고, 이름은 전부 가짜입니다.
+// - 1234 / 0000은 체험 모드 전용 비밀번호이며 실제 서비스 비밀번호가 아닙니다.
+import { test, expect } from '@playwright/test';
+
+const EDIT_PW = '1234';
+const VIEW_PW = '0000';
+
+async function login(page, pw) {
+  await page.fill('#pw', pw);
+  await page.click('#pwGo');
+}
+async function setupGroups(page) {
+  await page.goto('/');
+  await login(page, EDIT_PW);
+  await page.goto('/#check');
+  await page.click('#make13');
+  await expect(page.locator('.gp')).toHaveCount(13);
+}
+async function fillRoster(page, names) {
+  await page.click('#edit');
+  await page.fill('#en', '테스트 목장');
+  await page.fill('#el', '가목자');
+  await page.fill('#em', names.join('\n'));
+  await page.click('#eSave');
+  await expect(page.locator('.m')).toHaveCount(names.length);
+}
+
+test('로그인 전에는 출석 정보가 보이지 않는다', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#pw')).toBeVisible();
+  await expect(page.locator('#v-dashboard')).toBeHidden();
+  await expect(page.locator('#v-check')).toBeHidden();
+  await expect(page.locator('.tabs')).toBeHidden();
+});
+
+test('틀린 비밀번호는 거절된다', async ({ page }) => {
+  await page.goto('/');
+  await login(page, '9999');
+  await expect(page.locator('#pwMsg')).toContainText('맞지 않아요');
+  await expect(page.locator('#v-dashboard')).toBeHidden();
+});
+
+test('목장 13개를 한 번에 만든다', async ({ page }) => {
+  await setupGroups(page);
+  await expect(page.locator('.gp').first()).toContainText('1목장');
+  await expect(page.locator('.gp').last()).toContainText('13목장');
+});
+
+test('명단 수정 후 출석을 제출하면 대시보드에 반영된다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자', '나하늘', '다소망', '라은혜*', '마다온']);
+  await expect(page.locator('.m em')).toHaveCount(1); // 새가족 표시 1명
+  for (const n of ['가목자', '나하늘', '라은혜']) await page.click(`.m[data-n="${n}"]`);
+  await page.fill('#guests', '가짜방문자');
+  await page.click('#submit');
+  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
+
+  await page.goto('/#dashboard');
+  await expect(page.locator('#tTotal')).toContainText('3');
+  await expect(page.locator('#tTotal')).toContainText('/ 5명');
+  await expect(page.locator('#kSub')).toHaveText('1 / 13');
+  await expect(page.locator('#kNew')).toHaveText('1명');
+  await expect(page.locator('#kGuest')).toHaveText('1명');
+
+  await page.click('[data-open]');
+  const detail = page.locator('.detail').first();
+  await expect(detail).toContainText('출석 3명');
+  await expect(detail).toContainText('결석 2명');
+  await expect(detail).toContainText('다소망');
+  await expect(detail).toContainText('가짜방문자');
+});
+
+test('다시 제출하면 이전 기록을 덮어쓴다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자', '나하늘', '다소망']);
+  await page.click('#all');
+  await page.click('#submit');
+  await expect(page.locator('#submit')).toHaveText('다시 제출');
+  await page.click('#none');
+  await page.click('.m[data-n="가목자"]');
+  await page.click('#submit');
+  await page.goto('/#dashboard');
+  await expect(page.locator('#tTotal')).toContainText('1');
+  await expect(page.locator('#tTotal')).toContainText('/ 3명');
+});
+
+test('다른 주일로 넘기면 그 주 기록만 보인다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자', '나하늘']);
+  await page.click('#all');
+  await page.click('#submit');
+  await page.goto('/#dashboard');
+  await expect(page.locator('#kSub')).toHaveText('1 / 13');
+  await page.click('#prev');
+  await expect(page.locator('#kSub')).toHaveText('0 / 13');
+  await page.click('#next');
+  await expect(page.locator('#kSub')).toHaveText('1 / 13');
+});
+
+test('보기 비밀번호로는 대시보드만 보고 편집은 못 한다', async ({ page }) => {
+  await setupGroups(page);
+  await page.click('#logout');
+  await login(page, VIEW_PW);
+  await page.goto('/#dashboard');
+  await expect(page.locator('#kSub')).toHaveText('0 / 13');
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('보기 전용');
+  await expect(page.locator('#submit')).toHaveCount(0);
+  await expect(page.locator('#edit')).toHaveCount(0);
+});
+
+test('로그아웃하면 비밀번호 화면으로 돌아가고 다시 로그인할 수 있다', async ({ page }) => {
+  await page.goto('/');
+  await login(page, VIEW_PW);
+  await expect(page.locator('#v-dashboard')).toBeVisible();
+  await page.click('#logoutD');
+  await expect(page.locator('#pw')).toBeVisible();
+  await expect(page.locator('#v-dashboard')).toBeHidden();
+  await login(page, VIEW_PW);
+  await expect(page.locator('#v-dashboard')).toBeVisible();
+});
+
+test('이름에 코드를 넣어도 실행되지 않는다 (보안)', async ({ page }) => {
+  await setupGroups(page);
+  const evil = '<img src=x onerror="window.__hacked=1">';
+  await fillRoster(page, [evil]);
+  await page.goto('/#dashboard');
+  await page.click('[data-open]');
+  await expect(page.locator('.detail')).toContainText(evil);
+  expect(await page.evaluate(() => window.__hacked)).toBeUndefined();
+});
