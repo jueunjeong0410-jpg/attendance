@@ -87,9 +87,10 @@ test('시트 신호: 다른 업데이트가 진행 중이면 기다리다 busy',
   const c = webAppCtx(false, false);
   expect(c.doPost({})).toBe('busy'); expect(c.runs).toBe(0);
 });
-test('시트 신호: 오류가 나도 잠금을 풀고 error', () => {
+test('시트 신호: 오류가 나면 숨기지 않고 실패로 알리고, 잠금은 푼다', () => {
   const c = webAppCtx(true, true);
-  expect(c.doPost({})).toBe('error'); expect(c.released).toBe(1);
+  expect(() => c.doPost({})).toThrow();
+  expect(c.released).toBe(1);
 });
 
 test('시트: 같은 목장이 이어지는 행은 병합 범위로 묶인다', () => {

@@ -84,8 +84,9 @@ function runUpdateSafely_() {
     updateAttendanceSheet();
     return ContentService.createTextOutput('ok');
   } catch (err) {
+    // 오류를 숨기지 않고 다시 던져서, Apps Script '실행' 기록에 '실패'로 보이게 해요
     console.error(err);
-    return ContentService.createTextOutput('error');
+    throw err;
   } finally {
     lock.releaseLock();
   }
