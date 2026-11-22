@@ -193,3 +193,40 @@ test('대시보드에 구글 시트 바로가기 버튼이 있고 새 탭으로 
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(link).toContainText('구글 시트');
 });
+
+test('출석체크에 제출자 칸이 없다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자']);
+  await expect(page.locator('#by')).toHaveCount(0);
+  await expect(page.locator('#checkBody')).not.toContainText('제출자');
+});
+
+test('메모는 대시보드 맨 아래에 목장별로 모여 보인다', async ({ page }) => {
+  await setupGroups(page);
+  await fillRoster(page, ['가목자', '나하늘']);                    // 1번째 목장 이름이 '테스트 목장'이 됨
+  await page.click('#all');
+  await page.fill('#memo', '가짜 기도제목: 시험 기간');
+  await page.click('#submit');
+  await page.click('.gp >> nth=1');                               // 2목장: 메모 없이 제출
+  await page.click('#edit'); await page.fill('#em', '다소망'); await page.click('#eSave');
+  await page.click('#all'); await page.click('#submit');
+
+  await page.goto('/#dashboard');
+  const memos = page.locator('#memos .memo');
+  await expect(memos).toHaveCount(1);                             // 메모 남긴 목장만
+  await expect(memos.first()).toContainText('테스트 목장');
+  await expect(memos.first()).toContainText('가짜 기도제목: 시험 기간');
+  // 메모 칸은 목장별 출석 목록보다 아래에 있다
+  const rowsY = (await page.locator('#rows').boundingBox()).y;
+  const memoY = (await page.locator('#memos').boundingBox()).y;
+  expect(memoY).toBeGreaterThan(rowsY);
+  // 목장 상세에는 메모가 중복으로 나오지 않는다
+  await page.click('[data-open]');
+  await expect(page.locator('.detail')).not.toContainText('가짜 기도제목');
+});
+
+test('메모가 하나도 없으면 안내 문구가 보인다', async ({ page }) => {
+  await page.goto('/');
+  await login(page, VIEW_PW);
+  await expect(page.locator('#memos')).toContainText('메모가 없어요');
+});
