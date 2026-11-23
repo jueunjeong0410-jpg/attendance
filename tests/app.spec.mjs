@@ -243,16 +243,43 @@ test('연도가 바뀌면 목장을 새로 만들고, 지난 연도 목장·기�
   const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
   expect(Object.keys(demo.groups).filter(i => i.startsWith('2027_')).length).toBe(13);
   expect(demo.groups.g01).toEqual(g26);                                     // 2026 목장은 그대로
-  // 새해 1월 한 달 동안은 작년 기록을 마저 고칠 수 있고, 2월부터는 잠겨요
+  // 출석은 한 달(31일) 안의 날짜만 고칠 수 있어요: 1/5 기준 12/27은 되고 11/22는 안 돼요
   await page.goto('/#check');
+  await expect(page.locator('.lockmsg')).toContainText('한 달이 지난');
+  await expect(page.locator('#submit')).toHaveCount(0);
+  await page.fill('#date', '2026-12-27');
   await expect(page.locator('#submit')).toBeVisible();
+  // 2월이 되면 작년 목장은 아예 잠겨요
   await page.clock.setFixedTime(new Date('2027-02-01T03:00:00Z'));
   await page.reload();
   await login(page, EDIT_PW);
-  await page.fill('#date', '2026-11-22');
+  await page.fill('#date', '2026-12-27');
   await page.goto('/#check');
   await expect(page.locator('#checkBody')).toContainText('지난 연도');
   await expect(page.locator('#submit')).toHaveCount(0);
+});
+
+test('출석은 한 달(31일) 전 기록까지만 고칠 수 있다: 그보다 옛날은 보기만 (목자·새가족팀 모두)', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-24T03:00:00Z') });
+  await seed(page, { members: FAKE_MEMBERS, welcome: { '2026-10-18': { date: '2026-10-18', checked: { m_19960215_가하늘: { name: '가하늘', at: 'x' } } } },
+    groups: { g01: { id: 'g01', name: '1목장', order: 1, members: [{ name: '가하늘', isNew: false }] } } });
+  await login(page, EDIT_PW);
+  await page.goto('/#check');
+  await page.fill('#date', '2026-10-25');                                   // 30일 전 → 됨
+  await expect(page.locator('#submit')).toBeVisible();
+  await page.fill('#date', '2026-10-18');                                   // 37일 전 → 보기만
+  await expect(page.locator('.lockmsg')).toContainText('2026.10.24 이후');
+  await expect(page.locator('#submit')).toHaveCount(0);
+  await expect(page.locator('.m').first()).toBeDisabled();
+  await page.evaluate(() => window.__store.logout());
+  await login(page, NF_PW);
+  await page.fill('#date', '2026-10-18');
+  await page.goto('/#welcome');
+  await expect(page.locator('#welcomeBody .lockmsg')).toContainText('한 달이 지난');
+  await expect(page.locator('#wChk [data-chk]')).toHaveCount(0);           // 체크된 사람은 보이지만 취소 못 함
+  await expect(page.locator('#wChk')).toContainText('가하늘');
+  await page.click('#wRegBtn');                                             // 새가족 등록은 되지만, 그날 출석 체크 칸은 없음
+  await expect(page.locator('#rChk')).toHaveCount(0);
 });
 
 test('지난 연도는 출석·명단을 고칠 수 없다 (보기만)', async ({ page }) => {
