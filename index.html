@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- 보안: 이 페이지가 불러오거나 연결할 수 있는 곳을 Firebase·구글 시트 스크립트·글꼴로만 제한해요 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://script.google.com https://script.googleusercontent.com; frame-src https://youth-attendance-7a450.firebaseapp.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>청년부 출석</title>
 <meta name="theme-color" content="#1f5c3f">
 <link rel="manifest" href="manifest.json">

