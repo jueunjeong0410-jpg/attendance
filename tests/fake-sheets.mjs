@@ -81,20 +81,25 @@ function toFs(v) {
 }
 
 // Apps Script 전역 객체들(SpreadsheetApp, UrlFetchApp 등)을 가짜로 만들어요
-export function makeAppsScriptGlobals({ ss, groups = [], records = [], collections = {}, now = '2026-11-23', oauth = true, password = true }) {
+export function makeAppsScriptGlobals({ ss, groups = [], records = [], collections = {}, now = '2026-11-23', oauth = true, password = true, props = {}, mailFail = false }) {
   const id = (o) => o.id || (o.date + '_' + o.gid);
   const doc = (col) => (o) => ({ name: `projects/x/databases/(default)/documents/${col}/${id(o)}`, fields: Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'id' || col === 'groups').map(([k, x]) => [k, toFs(x)])) });
   const data = { groups, attendance: records, members: [], contacts: [], welcome: [], ...collections };
   const calls = [];   // 테스트에서 어떤 요청을 보냈는지 확인용
   const g = {
-    calls, commits: [],
+    calls, commits: [], mails: [], props,
     SpreadsheetApp: {
-      getActive: () => ss,
+      getActive: () => Object.assign(ss, { getUrl: () => 'https://docs.google.com/spreadsheets/d/fake' }),
       newConditionalFormatRule: () => chain({ build: () => ({}) }),
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperties: () => (password
-      ? { FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }
-      : { FIREBASE_PROJECT_ID: 'fake' }) }) },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperties: () => ({ ...(password
+        ? { FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }
+        : { FIREBASE_PROJECT_ID: 'fake' }), ...props }),
+      getProperty: (k) => (k in props ? props[k] : null),
+      setProperty: (k, v) => { props[k] = v; },
+    }) },
+    MailApp: { sendEmail: (m) => { if (mailFail) throw new Error('메일 실패'); g.mails.push(m); } },
     ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null) },
     UrlFetchApp: {
       fetch(url, opt = {}) {

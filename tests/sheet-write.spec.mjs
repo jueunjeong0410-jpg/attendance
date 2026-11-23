@@ -63,7 +63,7 @@ test('시트 쓰기: 두 번 연달아 업데이트해도 병합이 깨지지 �
 test('연도별 시트: 예전 "출석현황" 시트는 올해 시트로 이름이 바뀌고, 분기별통계 다음에 최신 연도부터', () => {
   const ss = makeSpreadsheet(['출석현황']);
   run(ss);
-  expect(ss.sheets.map(s => s.name)).toEqual(['분기별통계', '2026 출석현황', '2025 출석현황']);
+  expect(ss.sheets.map(s => s.name)).toEqual(['분기별통계', '새가족', '2026 출석현황', '2025 출석현황']);
   expect(ss.getSheetByName('출석현황')).toBeNull();
   const y25 = ss.getSheetByName('2025 출석현황');
   expect(y25.value(1, 1)).toBe('2025년 청년부 출석');
@@ -169,8 +169,7 @@ test('분기별통계 탭: 언제나 맨 앞 탭이고, 분기마다 한 줄(최
     { date: '2026-11-15', gid: 'g01', groupName: '가목장', present: ['가목자'], worship: ['나하늘'], absent: [], guests: ['가짜손님'] },
   ];
   run(ss, rs, { groups: gs });
-  expect(ss.sheets[0].name).toBe('분기별통계');
-  expect(ss.sheets[1].name).toBe('2026 출석현황');
+  expect(ss.sheets.map(x => x.name)).toEqual(['분기별통계', '새가족', '2026 출석현황', '전체인원']);
   const sh = ss.sheets[0];
   const row = (r) => Array.from({ length: 13 }, (_, c) => sh.value(r, c + 1));
   expect(row(3)[0]).toBe('분기');
@@ -180,4 +179,58 @@ test('분기별통계 탭: 언제나 맨 앞 탭이고, 분기마다 한 줄(최
   expect(sh.value(7, 1)).toBe('2026년 목장별 출석률(%)');
   expect([sh.value(8, 1), sh.value(8, 4), sh.value(8, 5)]).toEqual(['가목장', 50, 100]);  // 3분기 50%, 4분기 100%
   expect(sh.frozenRows).toBe(3);
+});
+
+/* ---------- 새가족 탭 · 알림 메일 ---------- */
+const NEW = [
+  { id: 'm_20030405_신소망', name: '신소망', isNew: true, status: 'active', firstVisit: '2026-11-15', registeredAt: '2026-11-22' },
+  { id: 'm_20010101_오래된', name: '오래된', status: 'active' },                                    // 가져온 기존 교인(새가족 아님)
+];
+const NEW_CONTACTS = [{ id: 'm_20030405_신소망', phone: '010-5555-6666', address: '가짜구 가짜로 2', birth: '2003-04-05', memo: '가짜 메모' }];
+const runNC = (ss, opt = {}) => run(ss, opt.records || [], { groups: [], collections: { members: opt.members || NEW, contacts: NEW_CONTACTS, welcome: opt.welcome || [] }, password: false, ...opt });
+
+test('새가족 탭: 두 번째 탭, 앱에서 등록한 새가족만 인적사항·출석 횟수와 함께 (전화번호는 글자 그대로)', () => {
+  const ss = makeSpreadsheet();
+  runNC(ss, { welcome: [{ date: '2026-11-15', checked: { m_20030405_신소망: { name: '신소망' } } }, { date: '2026-11-22', checked: { m_20030405_신소망: { name: '신소망' } } }],
+    records: [{ date: '2026-11-22', gid: 'g01', present: ['신소망'], worship: [], absent: [], ids: { 신소망: 'm_20030405_신소망' } }] });
+  expect(ss.sheets[1].name).toBe('새가족');
+  const sh = ss.sheets[1];
+  const row = (r) => Array.from({ length: 9 }, (_, c) => sh.value(r, c + 1));
+  expect(row(2)).toEqual(['등록한 날', '처음 온 날', '이름', '생년월일', '전화번호', '주소', '메모', '상태', '출석 횟수']);
+  expect(row(3)).toEqual(['2026-11-22', '2026-11-15', '신소망', '2003-04-05', '010-5555-6666', '가짜구 가짜로 2', '가짜 메모', '출석 중', 2]);  // 같은 날 두 번 체크돼도 1번
+  expect(sh.value(4, 3)).toBeUndefined();                                                     // 기존 교인은 안 나옴
+});
+
+test('새가족 탭: 보기 계정(예전 방식)으로 접속하면 연락처를 못 읽으니 새가족 탭은 건드리지 않는다', () => {
+  const ss = makeSpreadsheet();
+  run(ss, [], { groups: [], collections: { members: NEW, contacts: NEW_CONTACTS }, oauth: false });
+  expect(ss.getSheetByName('새가족')).toBeNull();
+});
+
+test('알림 메일: 처음 켤 때 있던 새가족은 보내지 않고, 그다음 등록부터 한 번씩만 보낸다', () => {
+  const props = { NOTIFY_EMAILS: 'leader@fake.test, pastor@fake.test' };
+  let ctx = runNC(makeSpreadsheet(), { props });
+  expect(ctx.mails.length).toBe(0);                                                            // 처음엔 기록만
+  expect(props.NOTIFIED_IDS).toContain('m_20030405_신소망');
+  const more = NEW.concat([{ id: 'm_20050505_새사람', name: '새사람', isNew: true, firstVisit: '2026-11-22', registeredAt: '2026-11-23' }]);
+  ctx = runNC(makeSpreadsheet(), { props, members: more });
+  expect(ctx.mails.length).toBe(1);
+  expect(ctx.mails[0].to).toBe('leader@fake.test,pastor@fake.test');
+  expect(ctx.mails[0].subject).toBe('[청년부] 새가족 등록: 새사람');
+  expect(ctx.mails[0].body).toContain('처음 온 날: 2026-11-22');
+  ctx = runNC(makeSpreadsheet(), { props, members: more });
+  expect(ctx.mails.length).toBe(0);                                                            // 다시 보내지 않음
+});
+
+test('알림 메일: 받을 사람이 없으면 기록만, 보내기 실패하면 다음에 다시 보낸다', () => {
+  const props = { NOTIFIED_IDS: '' };
+  const one = [{ id: 'm_1', name: '가', isNew: true }], two = one.concat([{ id: 'm_2', name: '나', isNew: true }]);
+  let ctx = runNC(makeSpreadsheet(), { props, members: one });
+  expect(ctx.mails.length).toBe(0);
+  expect(props.NOTIFIED_IDS).toContain('m_1');                                                 // 받을 사람 없을 때 등록 → 나중에 몰려 가지 않음
+  props.NOTIFY_EMAILS = 'leader@fake.test';
+  ctx = runNC(makeSpreadsheet(), { props, members: two, mailFail: true });
+  expect(props.NOTIFIED_IDS).not.toContain('m_2');                                             // 실패 → 기록 안 함
+  ctx = runNC(makeSpreadsheet(), { props, members: two });
+  expect(ctx.mails.map(m => m.subject)).toEqual(['[청년부] 새가족 등록: 나']);
 });

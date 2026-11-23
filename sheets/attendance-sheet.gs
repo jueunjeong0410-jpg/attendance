@@ -15,6 +15,8 @@
  *   (예전 방식) 구글 로그인이 안 되면 스크립트 속성의 FIREBASE_API_KEY·VIEWER_EMAIL·VIEWER_PASSWORD로 로그인해요.
  *
  * 분기별 통계: '분기별통계' 탭을 맨 앞에 두고 분기마다 한 줄씩 채워요. 계산은 'report' 파일(앱의 report.js와 같은 내용)에 있어요.
+ * 새가족: 앱에서 '새가족 등록'을 하면 '새가족' 탭(두 번째)에 인적사항이 올라가고,
+ *   스크립트 속성 NOTIFY_EMAILS(쉼표로 여러 명)에 적은 사람에게 알림 메일이 가요.
  *
  * 주의: 연도별 출석현황 시트와 분기별통계 탭은 업데이트할 때마다 새로 그려져요. 직접 적은 내용은 지워져요.
  */
@@ -54,15 +56,23 @@ function updateAttendanceSheet() {
   // 예전 '출석현황' 시트가 있으면 지우지 않고 올해 시트 이름으로 바꿔 써요
   var old = ss.getSheetByName(SHEET_NAME);
   if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
-  // 분기별 통계는 언제나 맨 앞 탭
+  // 분기별 통계는 언제나 맨 앞 탭, 그다음 새가족 탭
   var qs = writeQuarterSheet_(buildQuarterGrid(groups, records, welcomes, members));
   ss.setActiveSheet(qs); ss.moveActiveSheet(1);
+  var front = 1;
+  if (token.admin) {   // 연락처(전화·주소)는 스크립트 주인의 구글 로그인으로만 읽을 수 있어요
+    var contacts = {};
+    listDocs_(p, token, 'contacts').forEach(function (c) { contacts[c.id] = c; });
+    var nf = writeNewcomerSheet_(buildNewcomerRows(members, contacts, records, welcomes));
+    ss.setActiveSheet(nf); ss.moveActiveSheet(2); front = 2;
+    notifyNewcomers_(p, members, contacts);
+  }
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
     // 목장은 해마다 새로 짜요. 그 해 목장만 쓰고, 다른 해 목장 이름은 기록에 남은 이름 그대로 둬요
     var yearGroups = groups.filter(function (g) { return groupYear(g) === y; });
     var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
-    ss.setActiveSheet(sh); ss.moveActiveSheet(Math.min(i + 2, ss.getSheets().length));   // 분기별통계 다음, 최신 연도부터
+    ss.setActiveSheet(sh); ss.moveActiveSheet(Math.min(i + 1 + front, ss.getSheets().length));   // 분기별통계·새가족 다음, 최신 연도부터
   });
 }
 
@@ -474,4 +484,82 @@ function toFields_(o) {
   var f = {};
   Object.keys(o).forEach(function (k) { f[k] = toValue_(o[k]); });
   return f;
+}
+
+/* ---------- 새가족 탭 ---------- */
+var NEWCOMER_SHEET = '새가족';
+var NC_HEAD = ['등록한 날', '처음 온 날', '이름', '생년월일', '전화번호', '주소', '메모', '상태', '출석 횟수'];
+
+// 앱에서 등록한 새가족(isNew) 목록, 최근 등록부터 (순수 계산: 테스트 대상)
+// 출석 횟수 = 새가족팀 체크 또는 목자 체크(O·△)로 출석한 주일 수
+function buildNewcomerRows(members, contacts, records, welcomes) {
+  var came = {};
+  var mark = function (id, d) { (came[id] = came[id] || {})[d] = true; };
+  welcomes.forEach(function (w) { Object.keys(w.checked || {}).forEach(function (id) { mark(id, w.date); }); });
+  records.forEach(function (r) {
+    [].concat(r.present || [], r.worship || []).forEach(function (n) { var id = (r.ids || {})[n]; if (id) mark(id, r.date); });
+  });
+  var st = { active: '출석 중', 'break': '쉬는 중', left: '떠남' };
+  return members.filter(function (m) { return m.isNew; })
+    .sort(function (a, b) { return String(b.registeredAt || '').localeCompare(String(a.registeredAt || '')) || String(a.name).localeCompare(String(b.name)); })
+    .map(function (m) {
+      var c = contacts[m.id] || {};
+      return [m.registeredAt || '', m.firstVisit || '', m.name, c.birth || '', c.phone || '', c.address || '', c.memo || '',
+        st[m.status || 'active'] || '', Object.keys(came[m.id] || {}).length];
+    });
+}
+function writeNewcomerSheet_(rows) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(NEWCOMER_SHEET) || ss.insertSheet(NEWCOMER_SHEET);
+  sh.clear(); sh.setFrozenRows(0);
+  var v = [['청년부 새가족', ''], NC_HEAD].concat(rows.length ? rows : [['아직 앱에서 등록한 새가족이 없어요']]);
+  var w = NC_HEAD.length;
+  v = v.map(function (r) { var x = r.slice(); while (x.length < w) x.push(''); return x; });
+  if (sh.getMaxColumns() < w) sh.insertColumnsAfter(sh.getMaxColumns(), w - sh.getMaxColumns());
+  sh.getRange(1, 1, v.length, w).setNumberFormat('@').setValues(v);   // 전화번호 앞 0, 날짜가 바뀌지 않게 글자로
+  sh.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  sh.getRange(1, 2).setValue('업데이트 ' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'M/d HH:mm')).setFontColor('#5b6b62');
+  sh.getRange(2, 1, 1, w).setFontWeight('bold').setBackground('#1f5c3f').setFontColor('#ffffff');
+  sh.setFrozenRows(2);
+  sh.setColumnWidths(1, 2, 95); sh.setColumnWidth(3, 80); sh.setColumnWidth(4, 95); sh.setColumnWidth(5, 120);
+  sh.setColumnWidth(6, 220); sh.setColumnWidth(7, 220);
+  return sh;
+}
+
+/* ---------- 새가족 등록 알림 메일 ----------
+ * 스크립트 속성 NOTIFY_EMAILS 에 받을 사람 메일 주소(쉼표로 여러 명)를 적어 두면,
+ * 새가족이 등록될 때마다 한 번씩 메일이 가요. 보낸 사람은 스크립트 주인 Gmail이에요.
+ * 이미 알린 사람은 NOTIFIED_IDS 에 기록해서 다시 보내지 않아요.
+ * 처음 켤 때 있던 사람, 받을 사람이 아직 없을 때 등록된 사람은 보내지 않고 기록만 해요(나중에 한꺼번에 몰려 가지 않게).
+ * 메일 보내기가 실패해도 시트 업데이트는 계속하고, 실패한 사람은 다음 업데이트 때 다시 보내요.
+ */
+function newcomersToNotify(members, notified) {
+  return members.filter(function (m) { return m.isNew && !notified[m.id]; });
+}
+function notifyNewcomers_(p, members, contacts) {
+  var props = PropertiesService.getScriptProperties();
+  var to = String(p.NOTIFY_EMAILS || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+  var raw = props.getProperty('NOTIFIED_IDS');
+  var notified = {};
+  (raw ? raw.split(',') : []).forEach(function (id) { if (id) notified[id] = true; });
+  var todo = newcomersToNotify(members, notified);
+  if (!todo.length) return 0;
+  var sent = 0, failed = {};
+  if (raw !== null && to.length) {
+    todo.forEach(function (m) {
+      var c = contacts[m.id] || {};
+      try { MailApp.sendEmail({
+        to: to.join(','),
+        subject: '[청년부] 새가족 등록: ' + m.name,
+        body: '새가족이 등록됐어요.\n\n' +
+          '이름: ' + m.name + '\n생년월일: ' + (c.birth || '') + '\n전화번호: ' + (c.phone || '') + '\n주소: ' + (c.address || '') +
+          '\n처음 온 날: ' + (m.firstVisit || '') + '\n등록한 날: ' + (m.registeredAt || '') + (c.memo ? '\n메모: ' + c.memo : '') +
+          '\n\n구글 시트 \'새가족\' 탭에서도 볼 수 있어요.\n' + SpreadsheetApp.getActive().getUrl() +
+          '\n\n※ 개인정보가 담긴 메일이에요. 다른 사람에게 전달하지 말아 주세요.'
+      }); sent++; } catch (e) { failed[m.id] = true; console.error('알림 메일 실패: ' + e); }
+    });
+  }
+  todo.forEach(function (m) { if (!failed[m.id]) notified[m.id] = true; });
+  props.setProperty('NOTIFIED_IDS', Object.keys(notified).join(','));
+  return sent;
 }
