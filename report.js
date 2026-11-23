@@ -9,15 +9,41 @@
 var LEGACY_GROUP_YEAR = 2026;
 function rptGroupYear(g) { return Number(g.year) || LEGACY_GROUP_YEAR; }
 
+// 동명이인: 교인 명단(떠난 사람 제외)에 같은 이름이 둘 이상인 이름들
+function dupNameSet(members) {
+  var cnt = {}, out = {};
+  (members || []).forEach(function (m) { if ((m.status || 'active') === 'left') return; cnt[m.name] = (cnt[m.name] || 0) + 1; });
+  Object.keys(cnt).forEach(function (n) { if (cnt[n] > 1) out[n] = true; });
+  return out;
+}
+// 보여 줄 이름: 동명이인이면 이름 뒤에 출생연도 두 자리 (예: 김가은05)
+function nameLabel(m, dups) { return dups && dups[m.name] && m.birthYear ? m.name + String(m.birthYear).slice(2) : m.name; }
+// 이름 → 교인 id: 교인 명단에 그 이름이 딱 한 명일 때만. 동명이인은 '김가은05'처럼 생년을 붙인 이름으로만 찾아요
+function uniqueNames(members) {
+  var dups = dupNameSet(members), cnt = {}, id = {};
+  (members || []).forEach(function (m) {
+    if ((m.status || 'active') === 'left') return;
+    var k = nameLabel(m, dups); cnt[k] = (cnt[k] || 0) + 1; id[k] = m.id;
+  });
+  var out = {};
+  Object.keys(cnt).forEach(function (n) { if (cnt[n] === 1 && !dups[n]) out[n] = id[n]; });
+  return out;
+}
+// 목장 명단의 사람 → 교인 id (목자가 연결한 id가 먼저, 없으면 하나뿐인 이름으로)
+function rosterMid(m, uniq) { return m.mid || (uniq && uniq[m.name]) || ''; }
+
 // 대조: 한 주일의 목장 기록(attMap: 목장id → 기록)과 새가족팀 체크(checkedMap: 교인id → {name})
-function reconcile(gs, attMap, checkedMap) {
+// members(선택): 교인 명단. 주면 목장 명단에서 아직 연결 안 된 이름도 하나뿐인 이름이면 같은 사람으로 봐요
+function reconcile(gs, attMap, checkedMap, members) {
   checkedMap = checkedMap || {};
+  var uniq = members ? uniqueNames(members) : null;
   var where = {}, shep = {}, unlinked = [];
-  gs.forEach(function (g) { (g.members || []).forEach(function (m) { if (m.mid) where[m.mid] = g; }); });
+  gs.forEach(function (g) { (g.members || []).forEach(function (m) { var id = rosterMid(m, uniq); if (id) where[id] = g; }); });
   gs.forEach(function (g) {
     var r = attMap[g.id]; if (!r) return;
     var roster = {};
-    (g.members || []).forEach(function (m) { if (m.mid) roster[m.name] = m.mid; });
+    (g.members || []).forEach(function (m) { var id = rosterMid(m, uniq); if (id) roster[m.name] = id; });
+    if (uniq) Object.keys(uniq).forEach(function (n) { if (!roster[n]) roster[n] = uniq[n]; });   // 명단에서 빠졌지만 기록에 남은 이름
     [].concat(r.present || [], r.worship || []).forEach(function (n) {
       var mid = (r.ids || {})[n] || roster[n];
       if (mid) shep[mid] = { name: n, g: g }; else unlinked.push({ name: n, g: g });
@@ -68,7 +94,7 @@ function quarterStats(q, groups, records, welcomes, members) {
   var weeks = dates.map(function (d) {
     var attMap = {}, O = 0, guests = 0;
     recs.forEach(function (r) { if (r.date === d) { attMap[r.gid] = r; O += (r.present || []).length; guests += (r.guests || []).length; } });
-    var rc = reconcile(gs, attMap, wel[d] || {});
+    var rc = reconcile(gs, attMap, wel[d] || {}, members);
     // 이 주일에 출석한 사람 열쇠(교인 id 또는 목장id|이름)
     var came = {};
     rc.both.concat(rc.shepMiss, rc.noGroup, rc.notSubmitted, rc.nfMiss).forEach(function (x) { came[x.mid] = true; });
@@ -97,8 +123,9 @@ function quarterStats(q, groups, records, welcomes, members) {
   var last4 = weeks.slice(-4), absent4 = [];
   if (last4.length === 4) {
     gs.forEach(function (g) {
+      var uniq = uniqueNames(members);
       (g.members || []).forEach(function (m) {
-        var key = m.mid || (g.id + '|' + m.name);
+        var key = rosterMid(m, uniq) || (g.id + '|' + m.name);
         if (last4.every(function (w) { return !w.came[key]; })) absent4.push({ name: m.name, group: g.name, mid: m.mid || '' });
       });
     });
@@ -125,4 +152,4 @@ function quartersWithData(records, welcomes) {
   return Object.keys(qs).sort();
 }
 
-if (typeof module !== 'undefined') module.exports = { reconcile: reconcile, quarterStats: quarterStats, quarterOf: quarterOf, quarterRange: quarterRange, prevQuarter: prevQuarter, quartersWithData: quartersWithData, quarterLabel: quarterLabel };
+if (typeof module !== 'undefined') module.exports = { dupNameSet: dupNameSet, nameLabel: nameLabel, uniqueNames: uniqueNames, reconcile: reconcile, quarterStats: quarterStats, quarterOf: quarterOf, quarterRange: quarterRange, prevQuarter: prevQuarter, quartersWithData: quartersWithData, quarterLabel: quarterLabel };

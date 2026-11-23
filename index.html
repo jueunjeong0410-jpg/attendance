@@ -30,6 +30,9 @@ button{cursor:pointer}
 .top h1 small{font-size:13px;font-weight:500;opacity:.85}
 .date{display:flex;align-items:center;gap:6px;margin:10px 0}
 .date button{width:44px;height:44px;border-radius:10px;border:0;background:rgb(255 255 255/.15);color:#fff;font-size:18px}
+.date button:disabled{opacity:.3;cursor:not-allowed}
+.lockmsg{background:light-dark(#f1f1ef,#222);color:var(--mute);border-radius:10px;padding:10px 12px;font-size:14px}
+.m:disabled{opacity:.55;cursor:not-allowed}
 .date input{flex:1;height:44px;border-radius:10px;border:0;padding:0 12px;background:#fff;color:#14201a;font-size:16px;font-weight:700}
 .tabs{display:flex;gap:4px}
 .tabs a{flex:1;text-align:center;padding:11px 4px;color:#fff;text-decoration:none;font-weight:700;border-radius:10px 10px 0 0;opacity:.8}
@@ -105,14 +108,6 @@ textarea#memo{min-height:84px}
 .wname{background:none;border:0;text-align:left;padding:6px 8px;cursor:pointer;flex:1}.card{margin-top:12px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
 .tel{font-weight:700;color:var(--green)}
-.qnav{display:flex;align-items:center;gap:8px}.rcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 18px}
-.rcard{background:var(--panel);border-radius:12px;padding:12px}.rcard>span{font-size:13px;color:var(--mute)}.rcard b{display:block;font-size:28px;line-height:1.3}.rcard b small{font-size:14px;color:var(--mute);font-weight:400;margin-left:2px}.rcard div{font-size:13px}
-.up{color:var(--green);font-weight:700}.down{color:var(--red);font-weight:700}
-.rchart{width:100%;height:auto;max-height:240px}.rchart .gl{stroke:var(--line)}.rchart .ax{font-size:10px;fill:var(--mute)}.rchart .l1{fill:none;stroke:var(--green);stroke-width:2.5}.rchart .l2{fill:none;stroke:var(--wheat);stroke-width:2;stroke-dasharray:5 4}.rchart .p1{fill:var(--green)}
-.legend{display:flex;gap:16px;font-size:13px;color:var(--mute);margin:4px 0 16px}.legend i{display:inline-block;width:16px;height:0;border-top:3px solid var(--green);vertical-align:middle;margin-right:5px}.legend .k2{border-top:3px dashed var(--wheat)}
-.rbars{display:grid;gap:6px}.rb{display:grid;grid-template-columns:7em 1fr 3em;align-items:center;gap:8px;font-size:14px}.rb>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rb b{text-align:right}
-.rb .track{height:12px;background:var(--panel);border-radius:6px;overflow:hidden}.rb .track i{display:block;height:100%;background:var(--green);border-radius:0 6px 6px 0}.rb .track i.low{background:var(--red)}.lowtxt{color:var(--red)}
-.absent4{margin:14px 0}.absent4 summary{cursor:pointer;font-weight:700}.linkbtn{background:none;border:0;padding:0;color:var(--green);text-decoration:underline;cursor:pointer;font-size:inherit}
 .links{display:grid;gap:4px;margin:-4px 0 12px}.lk{font-size:14px;padding:6px 10px;border-radius:8px;background:var(--panel)}
 .lk.warn{background:light-dark(#fff4dd,#3a2f14)}.lk.no{color:var(--mute)}.lk select{padding:2px 4px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px}
 @media(max-width:600px){.tally{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
@@ -131,7 +126,6 @@ textarea#memo{min-height:84px}
     <a href="#dashboard" data-v="dashboard">대시보드</a>
     <a href="#check" data-v="check">출석체크</a>
     <a href="#welcome" data-v="welcome" id="tabWelcome" hidden>새가족</a>
-    <a href="#report" data-v="report">보고</a>
   </nav>
 </header>
 <main>
@@ -159,7 +153,6 @@ textarea#memo{min-height:84px}
   </section>
   <section id="v-check" hidden><div id="checkBody"></div></section>
   <section id="v-welcome" hidden><div id="welcomeBody"></div></section>
-  <section id="v-report" hidden><div id="reportBody"></div></section>
   <section id="v-login" hidden><div id="loginBody"></div></section>
 </main>
 <div class="toast" id="toast"></div>
@@ -218,8 +211,6 @@ if(!DEMO){
     onWelcome:(date,cb,err)=>F.onSnapshot(F.doc(fs,'welcome',date),d=>cb(d.exists()?d.data():null),err),
     checkIn:(date,mid,name)=>F.setDoc(F.doc(fs,'welcome',date),{date,checked:{[mid]:{name,at:new Date().toISOString()}},updatedAt:new Date().toISOString()},{merge:true}),
     checkOut:(date,mid)=>F.updateDoc(F.doc(fs,'welcome',date),new F.FieldPath('checked',mid),F.deleteField(),'updatedAt',new Date().toISOString()),
-    // 분기 보고: 기간 안의 기록 한 번에 읽기
-    rangeDocs:async(col,from,to)=>(await F.getDocs(F.query(F.collection(fs,col),F.where('date','>=',from),F.where('date','<=',to)))).docs.map(d=>d.data())
   };
 }else{
   const load=()=>{try{return JSON.parse(localStorage.getItem('demo'))||null}catch(e){return null}};
@@ -243,8 +234,7 @@ if(!DEMO){
     setContact:async(id,c)=>{D.contacts[id]=c;emit()},
     onWelcome:(date,cb)=>sub(()=>cb(D.welcome[date]||null)),
     checkIn:async(date,mid,name)=>{const w=D.welcome[date]||{date,checked:{}};w.checked[mid]={name,at:new Date().toISOString()};D.welcome[date]=w;emit()},
-    checkOut:async(date,mid)=>{if(D.welcome[date])delete D.welcome[date].checked[mid];emit()},
-    rangeDocs:async(col,from,to)=>Object.values(col==='welcome'?D.welcome:D.att).filter(x=>x.date>=from&&x.date<=to)
+    checkOut:async(date,mid)=>{if(D.welcome[date])delete D.welcome[date].checked[mid];emit()}
   };
   window.__store=store;   // 체험 모드 전용: 테스트에서 권한 확인용 (실제 Firebase 모드에는 없음)
   const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 목자 <b>1234</b>, 보기 <b>0000</b>, 새가족팀 <b>5678</b>';
@@ -256,7 +246,7 @@ if(!DEMO){
 let pingT=null;
 const pingSheet=()=>{if(!SHEET_SYNC_URL)return;clearTimeout(pingT);
   pingT=setTimeout(()=>{try{fetch(SHEET_SYNC_URL,{method:'POST',mode:'no-cors',keepalive:true}).catch(()=>{})}catch(e){}},3000)};
-['setGroup','delGroup','setAtt'].forEach(k=>{const f=store[k];store[k]=async(...a)=>{const r=await f(...a);pingSheet();return r}});
+['setGroup','delGroup','setAtt','addMember','setMember','setContact','checkIn','checkOut'].forEach(k=>{const f=store[k];store[k]=async(...a)=>{const r=await f(...a);pingSheet();return r}});
 
 /* ---------- 상태 ---------- */
 let groups=[],att={},loaded=false,role='',unG=null,members=[],unM=null,welcome=null,unW=null;
@@ -265,22 +255,34 @@ const pad=n=>String(n).padStart(2,'0');
 /* ---------- 연도: 해마다 목장·목원이 바뀌어요. 목장은 연도별로 따로 두고, 지난 연도 기록은 고칠 수 없어요 ---------- */
 const kNow=()=>new Date(Date.now()+9*3600e3);   // 한국 시간
 const thisYear=()=>kNow().getUTCFullYear();
-const yearOpen=y=>y>=thisYear()||(y===thisYear()-1&&kNow().getUTCMonth()===0);   // 1월 한 달은 작년 12월 기록을 고칠 수 있어요
+const yearOpen=y=>y>=thisYear()||(y===thisYear()-1&&kNow().getUTCMonth()===0);   // 새해 1월 한 달 동안은 작년 기록을 마저 고칠 수 있어요
 const gYear=g=>Number(g.year)||LEGACY_YEAR;
+/* 출석 기록은 한 달(31일) 전까지만 새로 넣거나 고칠 수 있어요 */
+const EDIT_DAYS=31;
+const oldestEditable=()=>{const x=new Date(today()+'T12:00');x.setDate(x.getDate()-EDIT_DAYS);return fmt(x)};
+const recOpen=d=>d>=oldestEditable()&&d<=today();
 const curYear=()=>Number(date.slice(0,4));
 const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const lastSunday=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return fmt(d)};
-let date=lastSunday();$('#date').value=date;
-const shift=n=>{const d=new Date(date+'T12:00');d.setDate(d.getDate()+n);setDate(fmt(d))};
+/* 미래 날짜는 고를 수 없어요: 달력에서 회색으로 보이고, ▶ 버튼도 흐리게 막혀요 */
+const today=()=>kNow().toISOString().slice(0,10);   // 한국 날짜
+const plus=(d,n)=>{const x=new Date(d+'T12:00');x.setDate(x.getDate()+n);return fmt(x)};
+let date=lastSunday();
+const dateUI=()=>{$('#date').value=date;$('#date').max=today();const nx=$('#next'),no=plus(date,7)>today();nx.disabled=no;nx.title=no?'미래 날짜는 고를 수 없어요':'다음 주일'};
+dateUI();
+const shift=n=>setDate(plus(date,n));
 $('#prev').onclick=()=>shift(-7);$('#next').onclick=()=>shift(7);
 $('#date').onchange=e=>e.target.value&&setDate(e.target.value);
-function setDate(d){date=d;$('#date').value=d;draft=null;subAtt();render()}
+function setDate(d){if(d>today()){toast('미래 날짜는 고를 수 없어요');d=today()}date=d;dateUI();draft=null;subAtt();render()}
 
 const parseMembers=t=>t.split(/\n/).map(s=>s.trim()).filter(Boolean).map(s=>({name:s.replace(/\*$/,'').trim(),isNew:/\*$/.test(s)}));
 const memberText=ms=>(ms||[]).map(m=>m.name+(m.isNew?'*':'')).join('\n');
 /* 목장 명단의 이름 ↔ 교인 명단 연결. 같은 이름이 여럿(동명이인)이면 목자가 골라요 */
 const active=()=>members.filter(m=>(m.status||'active')!=='left');
-const candidates=name=>active().filter(m=>m.name===name);
+const dups=()=>dupNameSet(members);
+const L=m=>nameLabel(m,dups());   // 동명이인은 '김가은05'처럼 생년 두 자리를 붙여 보여요
+const candidates=name=>{const c=active().filter(m=>m.name===name);if(c.length)return c;
+  const x=name.match(/^(.+?)(\d{2})$/);return x?active().filter(m=>m.name===x[1]&&String(m.birthYear||'').slice(2)===x[2]):[]};
 const mLabel=m=>[m.birthYear?String(m.birthYear).slice(2)+'년생':'',m.hint||''].filter(Boolean).join(' · ');
 let linkSel={};   // 명단 수정 중 고른 연결: 이름 → 교인 id ('' = 모름)
 const resolveMid=(name,prev)=>{if(name in linkSel)return linkSel[name]||undefined;const c=candidates(name);
@@ -317,7 +319,7 @@ function renderDash(){
   $('#memos').innerHTML=memos.map(g=>`<div class="memo"><b>${esc(g.name)}</b><span class="note"> 목자 ${esc(g.leader||'-')}</span><p>${esc(att[g.id].note)}</p></div>`).join('')
     ||'<div class="empty">이번 주에 남긴 메모가 없어요.</div>';
   // 큰 숫자 = 공식 출석: 목자 체크(O·△)와 새가족팀 체크 중 한 곳이라도 체크한 사람
-  const W=Object.keys(checked()).length,O=W?reconcile(gs,att,checked()).official:P;
+  const W=Object.keys(checked()).length,O=W?reconcile(gs,att,checked(),members).official:P;
   $('#tTotal').innerHTML=`${O}<span> / ${T}명</span>`;
   const r=T?Math.min(100,Math.round(O/T*100)):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`+(W?` · 목자 체크 ${P} · 새가족팀 체크 ${W}`:'');$('#tMeter').style.width=r+'%';
   $('#kSub').textContent=`${S} / ${gs.length}`;$('#kGroup').textContent=M+'명';$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
@@ -369,13 +371,14 @@ function renderCheck(){
     const prevMid=Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]));
     const drawLinks=()=>{const list=parseMembers($('#em').value);if(!members.length){$('#links').innerHTML='';return}
       $('#links').innerHTML=`<p class="note" style="margin:0 0 6px">교인 명단과 연결 · 새가족팀 출석과 맞춰 보는 데 써요</p>`+list.map(m=>{const c=candidates(m.name),mid=resolveMid(m.name,prevMid[m.name]);
-        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(m.name)} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
+        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(L(x))} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
         if(c.length===1)return `<div class="lk ok">✓ ${esc(m.name)} <span class="note">${esc(mLabel(c[0]))}</span></div>`;
         return `<div class="lk no">○ ${esc(m.name)} <span class="note">교인 명단에 없어요 · 새가족팀에 등록을 부탁해 주세요</span></div>`}).join('');
       $('#links').querySelectorAll('[data-lk]').forEach(sel=>sel.onchange=()=>{linkSel[sel.dataset.lk]=sel.value})};
     $('#em').addEventListener('input',drawLinks);drawLinks();
     $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
-      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);return mid?{...m,mid}:m});
+      // 연결된 동명이인은 명단 이름도 '김가은05'처럼 바꿔 저장해요(출석 기록·시트에도 그대로 남게)
+      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);if(!mid)return m;const x=members.find(y=>y.id===mid);return {...m,name:x?L(x):m.name,mid}});
       try{await store.setGroup(g.id,{...g,year:gYear(g),name,leader:$('#el').value.trim(),members:roster,order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
     $('#eCancel').onclick=()=>{editing=false;renderCheck()};
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
@@ -387,13 +390,15 @@ function renderCheck(){
     const S=n=>draft.st.get(n)||'';
     const cntText=()=>{let o=0,w=0;ms.forEach(m=>{const v=S(m.name);if(v==='O')o++;else if(v==='W')w++});return `<b>${o+w}</b> / ${ms.length}명 출석 <span class="note">(O ${o} · △ ${w})</span>`};
     const paint=(b,n)=>{const v=S(n);b.setAttribute('aria-pressed',v==='O'?'true':v==='W'?'mixed':'false');b.querySelector('.dot').textContent=v==='W'?'△':'✓';$('#cnt').innerHTML=cntText()};
+    const ro=!recOpen(date);   // 한 달이 지난 날짜: 보기만
     box.innerHTML=picker+`<div class="ghead"><h2>${esc(g.name)} <span class="note">목자 ${esc(g.leader||'-')}</span></h2><button class="btn ghost sm" id="edit">명단 수정</button></div>
+    ${ro?`<p class="lockmsg">한 달이 지난 기록이라 고칠 수 없어요. ${oldestEditable().replace(/-/g,'.')} 이후 기록만 고칠 수 있어요.</p>`:''}
     <p class="note">${a?'이미 제출된 기록이 있어요. 고쳐서 다시 제출하면 덮어써요.':ms.length?'이름을 누르면 O(목장모임까지 참석), <b>꾹 누르면 △(예배만)</b>예요.':'명단이 비어 있어요. ‘명단 수정’을 눌러 이름을 넣어 주세요.'}</p>
-    ${ms.length?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
-    <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
+    ${ms.length&&!ro?`<div class="actions"><button class="btn ghost sm" id="all">전체 출석</button><button class="btn ghost sm" id="none">전체 해제</button></div>`:''}
+    <div class="members">${ms.map(m=>{const v=S(m.name);return `<button class="m" ${ro?'disabled':''} data-n="${esc(m.name)}" aria-pressed="${v==='O'?'true':v==='W'?'mixed':'false'}"><span class="dot">${v==='W'?'△':'✓'}</span><span>${esc(m.name)}${m.isNew?'<br><em>새가족</em>':''}</span></button>`}).join('')}</div>
     <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
     <div class="field"><label for="memo">메모 (선택) · 대시보드 맨 아래에 목장별로 모여요</label><textarea id="memo" rows="3" placeholder="기도제목, 결석 사유 등">${esc(draft.note)}</textarea></div>
-    <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
+    ${ro?'':`<div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`}`+foot;
     $('#edit').onclick=()=>{editing=true;linkSel={};renderCheck()};
     // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
     box.querySelectorAll('.m').forEach(b=>{const n=b.dataset.n;let t=null,longDone=false;
@@ -403,9 +408,10 @@ function renderCheck(){
       b.addEventListener('contextmenu',e=>e.preventDefault());
       b.addEventListener('click',()=>{if(longDone){longDone=false;return}draft.st.set(n,S(n)==='O'?'':S(n)==='W'?'':'O');paint(b,n)});
     });
-    if(ms.length){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
+    if(ms.length&&!ro){$('#all').onclick=()=>{ms.forEach(m=>draft.st.set(m.name,'O'));renderCheck()};$('#none').onclick=()=>{draft.st.clear();renderCheck()}}
     $('#guests').oninput=e=>draft.guests=e.target.value;$('#memo').oninput=e=>draft.note=e.target.value;
-    $('#submit').onclick=async e=>{e.target.disabled=true;
+    if(ro){$('#guests').disabled=true;$('#memo').disabled=true}
+    if(!ro)$('#submit').onclick=async e=>{e.target.disabled=true;
       const is=v=>m=>S(m.name)===v;
       const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
         newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
@@ -424,7 +430,7 @@ function renderCheck(){
    공식 출석 = 둘 중 한 곳이라도 체크한 사람(합집합). 사람 비교는 교인 id로 해요(동명이인 구분). */
 // reconcile(목장들, 목장 기록, 새가족팀 체크)는 report.js에 있어요 (앱·시트 스크립트가 같은 계산을 써요)
 function drawRecon(){const el=$('#wRecon');if(!el)return;
-  const R=reconcile(sorted(),att,checked()),chip=(x,c='')=>`<span class="chip ${c}">${esc(x.name)}${x.g?` <small>${esc(x.g.name)}</small>`:''}</span>`;
+  const R=reconcile(sorted(),att,checked(),members),chip=(x,c='')=>`<span class="chip ${c}">${esc(x.name)}${x.g?` <small>${esc(x.g.name)}</small>`:''}</span>`;
   const sec=(title,list,c,help)=>list.length?`<h3>${title} ${list.length}명</h3>${help?`<p class="note">${help}</p>`:''}<div class="chips">${list.map(x=>chip(x,c)).join('')}</div>`:'';
   const byG={};[...R.shepMiss,...R.nfMiss].forEach(x=>{byG[x.g.name]=(byG[x.g.name]||0)+1});
   el.innerHTML=`<div class="tally recon"><div><div class="big">${R.official}<span>명</span></div><div class="note">공식 출석 · 한 곳이라도 체크한 사람</div></div>
@@ -454,7 +460,7 @@ function renderWelcome(){
   const open=yearOpen(curYear()),n=Object.keys(checked()).length;
   box.innerHTML=`<div class="ghead"><h2>새가족팀 출석 <span class="note">${date.replace(/-/g,'.')} 주일 · <b id="wN">${n}</b>명</span></h2>
     ${open?'<button class="btn sm" id="wRegBtn">+ 새가족 등록</button>':''}</div>
-    ${open?'':'<p class="note">지난 연도 기록은 고칠 수 없어요. 보기만 할 수 있어요.</p>'}
+    ${!open?'<p class="note">지난 연도 기록은 고칠 수 없어요. 보기만 할 수 있어요.</p>':!recOpen(date)?`<p class="lockmsg">한 달이 지난 날짜라 출석 체크는 고칠 수 없어요. ${oldestEditable().replace(/-/g,'.')} 이후만 돼요.</p>`:''}
     <div id="wRegBox"></div>
     <div class="field"><label for="ws">이름 검색</label><input type="search" id="ws" placeholder="이름 두세 글자" autocomplete="off" value="${esc(wq)}"></div>
     <div id="wRes" class="wlist"></div>
@@ -465,11 +471,11 @@ function renderWelcome(){
   if(open)$('#wRegBtn').onclick=()=>{wReg=!wReg;drawWReg()};
   drawWReg();drawWResults();drawWChecked();drawWCard();drawRecon();
 }
-const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(m.name)}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
-  ${yearOpen(curYear())?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
+const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(L(m))}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
+  ${yearOpen(curYear())&&recOpen(date)?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
 function bindW(el){
   el.querySelectorAll('[data-chk]').forEach(b=>b.onclick=async()=>{const id=b.dataset.chk,m=members.find(x=>x.id===id),on=!!checked()[id];b.disabled=true;
-    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?.name||'');toast(on?`${m?.name} 출석 취소`:`${m?.name} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
+    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?L(m):'');toast(on?`${m?L(m):''} 출석 취소`:`${m?L(m):''} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
   el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{wOpen=wOpen===b.dataset.card?'':b.dataset.card;drawWCard()});
 }
 function drawWResults(){const el=$('#wRes');if(!el)return;const q=wq.trim();
@@ -487,7 +493,7 @@ async function drawWCard(){const el=$('#wCard');if(!el)return;const id=wOpen;if(
   if(wOpen!==id)return;
   const tel=String(c.phone||'').replace(/[^0-9+]/g,'');
   el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처">
-    <div class="ghead"><h3 style="margin:0">${esc(m.name)} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
+    <div class="ghead"><h3 style="margin:0">${esc(L(m))} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
     <dl class="kv"><dt>전화</dt><dd>${c.phone?`<a href="tel:${esc(tel)}" class="tel">${esc(c.phone)}</a>`:'<span class="note">없음</span>'}</dd>
     <dt>주소</dt><dd>${esc(c.address||'')||'<span class="note">없음</span>'}</dd>
     <dt>생일</dt><dd>${esc(c.birth||'')||'<span class="note">없음</span>'}</dd>
@@ -509,63 +515,27 @@ function drawWReg(){const el=$('#wRegBox');if(!el)return;if(!wReg){el.innerHTML=
   el.innerHTML=`<div class="panel"><h3 style="margin-top:0">새가족 등록</h3>
     <div class="grid2"><div class="field"><label for="rName">이름 (필수)</label><input id="rName" autocomplete="off"></div>
     <div class="field"><label for="rBirth">생년월일 (필수)</label><input type="date" id="rBirth" min="1950-01-01" max="${fmt(new Date())}"></div></div>
-    <div class="grid2"><div class="field"><label for="rPhone">전화번호 (필수)</label><input id="rPhone" inputmode="tel" placeholder="010-0000-0000"></div>
-    <div class="field"><label for="rFirst">처음 온 날</label><input type="date" id="rFirst" value="${date}"></div></div>
+    <div class="field"><label for="rPhone">전화번호 (필수)</label><input id="rPhone" inputmode="tel" placeholder="010-0000-0000"></div>
+    <div class="grid2"><div class="field"><label for="rFirst">처음 온 날</label><input type="date" id="rFirst" value="${date}" max="${today()}"></div>
+    <div class="field"><label for="rReg">등록한 날</label><input type="date" id="rReg" value="${today()}" max="${today()}"></div></div>
     <div class="field"><label for="rAddr">주소</label><input id="rAddr"></div>
     <div class="field"><label for="rMemo">메모 (선택)</label><textarea id="rMemo" rows="2" placeholder="인도자, 관심사 등"></textarea></div>
-    <label class="note"><input type="checkbox" id="rChk" checked> 오늘 출석도 함께 체크</label>
+    ${recOpen(date)?`<label class="note"><input type="checkbox" id="rChk" checked> ${date.replace(/-/g,'.')} 출석도 함께 체크</label>`:''}
     <div class="actions"><button class="btn" id="rSave">등록</button><button class="btn ghost" id="rCancel">취소</button><span class="note" id="rMsg"></span></div></div>`;
   $('#rCancel').onclick=()=>{wReg=false;drawWReg()};
   $('#rSave').onclick=async e=>{const name=$('#rName').value.trim(),birth=$('#rBirth').value,phone=fmtPhone($('#rPhone').value),msg=$('#rMsg');
     if(!name)return msg.textContent='이름을 적어 주세요';if(!birth)return msg.textContent='생년월일을 넣어 주세요';if(!phone)return msg.textContent='전화번호를 확인해 주세요 (숫자 10~11자리)';
     const id=memberIdFor(name,birth);
     if(members.some(m=>m.id===id)){msg.textContent='이미 등록된 사람이에요. 이름으로 검색해 주세요';wq=name;drawWResults();return}
+    const first=$('#rFirst').value||date,reg=$('#rReg').value||today();
+    if(first>today()||reg>today())return msg.textContent='처음 온 날·등록한 날은 오늘 이후로 할 수 없어요';
+    if(first>reg)return msg.textContent='등록한 날은 처음 온 날과 같거나 그 뒤여야 해요';
     e.target.disabled=true;
-    const first=$('#rFirst').value||date;
-    try{await store.addMember(id,{name,birthYear:Number(birth.slice(0,4)),hint:'새가족',status:'active',registeredAt:fmt(new Date()),firstVisit:first,isNew:true},
+    try{await store.addMember(id,{name,birthYear:Number(birth.slice(0,4)),hint:'새가족',status:'active',registeredAt:reg,firstVisit:first,isNew:true},
         {phone,address:$('#rAddr').value.trim(),birth,memo:$('#rMemo').value.trim()});
-      if($('#rChk').checked)await store.checkIn(date,id,name);
+      if($('#rChk')?.checked&&recOpen(date))await store.checkIn(date,id,name);   // 한 달 지난 날짜엔 출석 체크 안 함   // 한 달 지난 날짜엔 출석 체크 안 함
       toast(`${name} 님을 등록했어요`);wReg=false;wq='';renderWelcome()}
     catch(err){msg.textContent=err?.code==='already-exists'?'이미 등록된 사람이에요':errMsg(err);e.target.disabled=false}};
-}
-
-/* ---------- 분기 보고 (계산은 report.js의 quarterStats) ---------- */
-let repQ='',repData={},repBusy='';
-async function loadQuarter(q){const pq=prevQuarter(q),from=quarterRange(pq).from,to=quarterRange(q).to;
-  const [recs,wels]=await Promise.all([store.rangeDocs('attendance',from,to),store.rangeDocs('welcome',from,to)]);
-  repData[q]={recs,wels,at:Date.now()}}
-function renderReport(){
-  const box=$('#reportBody');if(!repQ)repQ=quarterOf(fmt(new Date()));
-  const q=repQ,d=repData[q];
-  const nav=`<div class="ghead"><h2>분기 보고</h2><div class="qnav"><button class="btn ghost sm" id="qPrev" aria-label="이전 분기">◀</button>
-    <b id="qLabel">${esc(quarterLabel(q))}</b><button class="btn ghost sm" id="qNext" aria-label="다음 분기" ${q>=quarterOf(fmt(new Date()))?'disabled':''}>▶</button></div></div>`;
-  const bind=()=>{$('#qPrev').onclick=()=>{repQ=prevQuarter(repQ);renderReport()};
-    $('#qNext').onclick=()=>{const [y,n]=[Number(repQ.slice(0,4)),Number(repQ.slice(-1))];repQ=n===4?(y+1)+'-Q1':y+'-Q'+(n+1);renderReport()};
-    const r=$('#rRefresh');if(r)r.onclick=()=>{delete repData[q];renderReport()}};
-  if(!d||Date.now()-d.at>5*60e3){box.innerHTML=nav+'<div class="empty">불러오는 중…</div>';bind();
-    if(repBusy!==q){repBusy=q;loadQuarter(q).then(()=>{repBusy='';if(view==='report'&&repQ===q)renderReport()}).catch(e=>{repBusy='';box.querySelector('.empty').textContent=errMsg(e)})}return}
-  const S=quarterStats(q,groups,d.recs,d.wels,members),P=quarterStats(prevQuarter(q),groups,d.recs,d.wels,members);
-  const delta=(a,b)=>{if(!P.sundays)return '<span class="note">지난 분기 기록 없음</span>';const x=Math.round((a-b)*10)/10;return x===0?'<span class="note">지난 분기와 같음</span>':`<span class="${x>0?'up':'down'}">${x>0?'▲':'▼'} ${Math.abs(x)}명</span> <span class="note">지난 분기 대비</span>`};
-  const md=x=>Number(x.slice(5,7))+'/'+Number(x.slice(8,10));
-  const card=(t,v,sub)=>`<div class="rcard"><span>${t}</span><b>${v}<small>명</small></b><div>${sub}</div></div>`;
-  const W=S.weekly,maxY=Math.max(10,...W.map(w=>w.official)),wd=320,ht=150,px=i=>W.length<2?wd/2:16+i*(wd-32)/(W.length-1),py=v=>ht-14-v/maxY*(ht-34);
-  const line=k=>W.map((w,i)=>`${i?'L':'M'}${px(i).toFixed(1)},${py(w[k]).toFixed(1)}`).join('');
-  const chart=W.length?`<svg viewBox="0 0 ${wd} ${ht}" class="rchart" role="img" aria-label="주별 출석 추이: ${W.map(w=>md(w.date)+' '+w.official+'명').join(', ')}">
-    ${[0,.5,1].map(f=>`<line x1="10" x2="${wd-6}" y1="${py(maxY*f)}" y2="${py(maxY*f)}" class="gl"/><text x="2" y="${py(maxY*f)-3}" class="ax">${Math.round(maxY*f)}</text>`).join('')}
-    <path d="${line('official')}" class="l1"/><path d="${line('group')}" class="l2"/>
-    ${W.map((w,i)=>`<circle cx="${px(i)}" cy="${py(w.official)}" r="3" class="p1"><title>${md(w.date)} 공식 ${w.official}명 · 목장모임 ${w.group}명</title></circle><text x="${px(i)}" y="${ht-1}" class="ax" text-anchor="middle">${md(w.date)}</text>`).join('')}</svg>
-    <div class="legend"><span><i class="k1"></i>예배 출석(공식)</span><span><i class="k2"></i>목장모임</span></div>`:'';
-  const rates=S.groupRates.filter(g=>g.rate!=null).sort((a,b)=>b.rate-a.rate);
-  box.innerHTML=nav+(S.sundays?`<p class="note">${md(S.weekly[0].date)} ~ ${md(S.weekly[S.weekly.length-1].date)} · 주일 ${S.sundays}회 · 목장 명단 ${S.roster}명
-      ${role==='nf'&&SHEET_URL?` · <a href="${esc(SHEET_URL)}" target="_blank" rel="noopener">구글 시트로 보기</a>`:''} · <button class="linkbtn" id="rRefresh">새로고침</button></p>
-    <div class="rcards">${card('평균 예배 출석',S.avgOfficial,delta(S.avgOfficial,P.avgOfficial))}${card('평균 목장모임',S.avgGroup,delta(S.avgGroup,P.avgGroup))}
-      ${card('새가족 등록',S.newcomers,`<span class="note">그중 3회 이상 출석 ${S.settled}명</span>`)}${card('방문자',S.guests,`<span class="note">주일 평균 ${S.avgGuests}명</span>`)}</div>
-    <h3>주별 출석 추이</h3>${chart}
-    <h3>목장별 평균 출석률</h3><div class="rbars">${rates.map(g=>`<div class="rb"><span>${esc(g.name)}</span><span class="track"><i class="${g.rate<60?'low':''}" style="width:${g.rate}%"></i></span><b>${g.rate}%</b></div>`).join('')||'<div class="empty">목장 출석 기록이 없어요.</div>'}</div>
-    <p class="note">출석률 = 제출한 주의 (O+△) ÷ 명단 인원 · <span class="lowtxt">빨간색</span>은 60% 미만</p>
-    <details class="absent4"><summary>4주 연속 결석 <b>${S.absent4.length}명</b></summary><div class="chips">${S.absent4.map(a=>`<span class="chip">${esc(a.name)} <small>${esc(a.group)}</small></span>`).join('')||'<span class="note">없어요</span>'}</div></details>`
-    :'<div class="empty">이 분기에는 출석 기록이 없어요.</div>');
-  bind();
 }
 
 /* ---------- 화면 전환 ---------- */
@@ -573,17 +543,17 @@ const typing=(sel='#v-check')=>{const f=document.activeElement;return f&&f.close
 function render(){
   const out=!role;
   $('.date').hidden=out;$('.tabs').hidden=out;$('#v-login').hidden=!out;
-  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';$('#v-welcome').hidden=out||view!=='welcome';$('#v-report').hidden=out||view!=='report';
+  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';$('#v-welcome').hidden=out||view!=='welcome';
   $('#tabWelcome').hidden=role!=='nf';
   if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));return}
   document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  if(view==='dashboard')renderDash();else if(view==='welcome')renderWelcome();else if(view==='report')renderReport();else if(!typing())renderCheck();
+  if(view==='dashboard')renderDash();else if(view==='welcome')renderWelcome();else if(!typing())renderCheck();
   sheetBtn();
 }
 /* 구글 시트 버튼: 새가족팀만 보여요. 다른 권한은 버튼도, 링크 주소도 없어요 */
 function sheetBtn(){const a=$('#sheetLink');const ok=!!SHEET_URL&&role==='nf';a.hidden=!ok;
   if(ok)a.href=SHEET_URL;else a.removeAttribute('href')}
-const route=()=>{view={'#check':'check','#welcome':'welcome','#report':'report'}[location.hash]||'dashboard';render()};
+const route=()=>{view={'#check':'check','#welcome':'welcome'}[location.hash]||'dashboard';render()};
 addEventListener('hashchange',route);
 
 /* ---------- 데이터 연결 ---------- */

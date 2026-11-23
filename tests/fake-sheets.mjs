@@ -81,33 +81,41 @@ function toFs(v) {
 }
 
 // Apps Script 전역 객체들(SpreadsheetApp, UrlFetchApp 등)을 가짜로 만들어요
-export function makeAppsScriptGlobals({ ss, groups = [], records = [], collections = {}, now = '2026-11-23', oauth = true, password = true }) {
+export function makeAppsScriptGlobals({ ss, groups = [], records = [], collections = {}, now = '2026-11-23', oauth = true, password = true, props = {}, mailFail = false }) {
   const id = (o) => o.id || (o.date + '_' + o.gid);
   const doc = (col) => (o) => ({ name: `projects/x/databases/(default)/documents/${col}/${id(o)}`, fields: Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'id' || col === 'groups').map(([k, x]) => [k, toFs(x)])) });
   const data = { groups, attendance: records, members: [], contacts: [], welcome: [], ...collections };
   const calls = [];   // 테스트에서 어떤 요청을 보냈는지 확인용
   const g = {
-    calls, commits: [],
+    calls, commits: [], mails: [], pushes: [], props, triggers: [],
     SpreadsheetApp: {
-      getActive: () => ss,
+      getActive: () => Object.assign(ss, { getUrl: () => 'https://docs.google.com/spreadsheets/d/fake' }),
       newConditionalFormatRule: () => chain({ build: () => ({}) }),
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperties: () => (password
-      ? { FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }
-      : { FIREBASE_PROJECT_ID: 'fake' }) }) },
-    ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null) },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperties: () => ({ ...(password
+        ? { FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }
+        : { FIREBASE_PROJECT_ID: 'fake' }), ...props }),
+      getProperty: (k) => (k in props ? props[k] : null),
+      setProperty: (k, v) => { props[k] = v; },
+    }) },
+    MailApp: { sendEmail: (m) => { if (mailFail) throw new Error('메일 실패'); g.mails.push(m); } },
+    ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null), WeekDay: { SUNDAY: 'SUNDAY' }, getProjectTriggers: () => g.triggers, deleteTrigger: (t) => { g.triggers = g.triggers.filter(x => x !== t); },
+      newTrigger: (fn) => { const t = { fn, spec: [] , getHandlerFunction: () => fn }; const b = new Proxy({}, { get: (_o, k) => (k === 'create' ? () => { g.triggers.push(t); return t; } : (...a) => { t.spec.push([k, ...a]); return b; }) }); return b; } },
     UrlFetchApp: {
       fetch(url, opt = {}) {
         calls.push({ url, auth: opt.headers && opt.headers.Authorization, method: opt.method || 'get' });
         const ok = (body) => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify(body) });
         if (url.includes('signInWithPassword')) return password ? ok({ idToken: 'fake-token' }) : { getResponseCode: () => 400, getContentText: () => '{}' };
         if (opt.headers && opt.headers.Authorization === 'Bearer fake-oauth' && !oauth) return { getResponseCode: () => 403, getContentText: () => '{}' };
+        if (url === 'https://ntfy.sh') { g.pushes.push(JSON.parse(opt.payload)); return ok({ id: 'x' }); }
         if (url.includes(':commit')) { const b = JSON.parse(opt.payload); g.commits.push(b); return ok({ writeResults: b.writes.map(() => ({})) }); }
         const col = (url.match(/documents\/([a-z]+)/) || [])[1];
         return ok({ documents: (data[col] || []).map(doc(col)) });
       },
     },
-    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : '11/23 02:00') },
+    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : fmt === 'yyyy-MM' ? now.slice(0, 7)
+      : fmt === 'u' ? String(new Date(now + 'T12:00:00Z').getUTCDay() || 7) : '11/23 02:00') },
     console: { error() {}, log() {} },
   };
   return g;

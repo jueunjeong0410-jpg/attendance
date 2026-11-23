@@ -61,3 +61,20 @@ test('기록이 있는 분기 목록, 기록 없는 분기는 0', () => {
   const e = R.quarterStats('2026-Q1', groups, records, welcomes, members);
   expect([e.sundays, e.avgOfficial, e.absent4.length]).toEqual([0, 0, 0]);
 });
+
+test('이름 맞추기: 교인 명단에 한 명뿐인 이름은 목장 명단과 연결 안 돼 있어도 같은 사람으로 본다 (동명이인·떠난 사람 제외)', () => {
+  const ms = [{ id: 'a', name: '가' }, { id: 'b1', name: '나' }, { id: 'b2', name: '나' }, { id: 'c', name: '다', status: 'left' }];
+  expect(R.uniqueNames(ms)).toEqual({ 가: 'a' });
+  const gs = [{ id: 'g1', name: '1목장', members: [{ name: '가' }, { name: '나' }] }];
+  const r = R.reconcile(gs, { g1: { present: ['가', '나'], worship: [], absent: [] } }, { a: { name: '가' } }, ms);
+  expect(r.both.map(x => x.name)).toEqual(['가']);                           // '가'는 연결 없이도 일치
+  expect(r.unlinked.map(x => x.name)).toEqual(['나']);                       // 동명이인은 목자가 골라야
+  expect(R.reconcile(gs, { g1: { present: ['가'], worship: [], absent: [] } }, { a: { name: '가' } }).both.length).toBe(0);  // 명단 안 주면 예전처럼
+});
+
+test('동명이인 이름표: 생년 두 자리를 붙이고, 그 이름으로 찾을 수 있다', () => {
+  const ms = [{ id: 'a', name: '김가은', birthYear: 2001 }, { id: 'b', name: '김가은', birthYear: 2005 }, { id: 'c', name: '나하늘', birthYear: 1999 }];
+  const d = R.dupNameSet(ms);
+  expect(ms.map(m => R.nameLabel(m, d))).toEqual(['김가은01', '김가은05', '나하늘']);
+  expect(R.uniqueNames(ms)).toEqual({ 김가은01: 'a', 김가은05: 'b', 나하늘: 'c' });
+});
