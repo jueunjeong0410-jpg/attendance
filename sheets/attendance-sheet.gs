@@ -8,11 +8,11 @@
  *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), 4번째 줄: 날짜별 방문자 수 합계
  *
  * 설정 (코드에는 비밀번호를 적지 않아요):
- *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성에 4개를 넣어 주세요.
- *     FIREBASE_API_KEY     Firebase 웹 설정의 apiKey
- *     FIREBASE_PROJECT_ID  Firebase 웹 설정의 projectId
- *     VIEWER_EMAIL         보기 계정 이메일 (예: viewer@youth.app)
- *     VIEWER_PASSWORD      보기 계정 비밀번호
+ *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성
+ *     FIREBASE_PROJECT_ID  Firebase 웹 설정의 projectId (필수)
+ *   Firebase 읽기는 이 스크립트 주인의 구글 로그인으로 해요(비밀번호 필요 없음).
+ *   그래서 이 스크립트 주인 = Firebase 프로젝트 주인이어야 하고, appsscript.json에 datastore 권한이 있어야 해요.
+ *   (예전 방식) 구글 로그인이 안 되면 스크립트 속성의 FIREBASE_API_KEY·VIEWER_EMAIL·VIEWER_PASSWORD로 로그인해요.
  *
  * 주의: 연도별 출석현황 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
  */
@@ -39,11 +39,8 @@ function turnOnHourlyUpdate() {
 
 /* ---------- 실행 ---------- */
 function updateAttendanceSheet() {
-  var p = PropertiesService.getScriptProperties().getProperties();
-  ['FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'VIEWER_EMAIL', 'VIEWER_PASSWORD'].forEach(function (k) {
-    if (!p[k]) throw new Error('스크립트 속성에 ' + k + ' 값이 없어요.');
-  });
-  var token = signIn_(p);
+  var p = props_();
+  var token = auth_(p);
   var groups = listDocs_(p, token, 'groups');
   var records = listDocs_(p, token, 'attendance');
   var thisYear = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy'));
@@ -53,12 +50,16 @@ function updateAttendanceSheet() {
   if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
-    var sh = writeSheet_(buildGrid(groups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
+    // 목장은 해마다 새로 짜요. 그 해 목장만 쓰고, 다른 해 목장 이름은 기록에 남은 이름 그대로 둬요
+    var yearGroups = groups.filter(function (g) { return groupYear(g) === y; });
+    var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
     ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);   // 최신 연도가 맨 앞
   });
 }
 
 /* ---------- 연도별 시트 ---------- */
+var LEGACY_YEAR = 2026;   // 연도 표시가 없는 예전 목장은 2026년 목장
+function groupYear(g) { return Number(g.year) || LEGACY_YEAR; }
 function sheetNameForYear(y) { return y + ' ' + SHEET_NAME; }
 
 // 기록이 있는 연도 + 올해(기록이 없어도 빈 표를 만들어 둠), 최신 연도부터
@@ -93,6 +94,26 @@ function runUpdateSafely_() {
 }
 
 /* ---------- Firebase 읽기 ---------- */
+function props_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  if (!p.FIREBASE_PROJECT_ID) throw new Error('스크립트 속성에 FIREBASE_PROJECT_ID 값이 없어요.');
+  return p;
+}
+function docsUrl_(p) {
+  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(p.FIREBASE_PROJECT_ID) + '/databases/(default)/documents';
+}
+// 1순위: 스크립트 주인의 구글 로그인(비밀번호 없음). 2순위(예전 방식): 보기 계정 비밀번호
+function auth_(p) {
+  var t = null;
+  try { t = ScriptApp.getOAuthToken(); } catch (e) { t = null; }
+  if (t) {
+    var h = { Authorization: 'Bearer ' + t, 'X-Goog-User-Project': p.FIREBASE_PROJECT_ID };
+    var res = UrlFetchApp.fetch(docsUrl_(p) + '/groups?pageSize=1', { headers: h, muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) return { headers: h, admin: true };
+  }
+  if (p.VIEWER_PASSWORD) return { headers: { Authorization: 'Bearer ' + signIn_(p) }, admin: false };
+  throw new Error('Firebase에 접속하지 못했어요. 이 스크립트 주인이 Firebase 프로젝트 주인인지, appsscript.json에 datastore 권한이 있는지 확인해 주세요.');
+}
 function signIn_(p) {
   var res = UrlFetchApp.fetch(
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(p.FIREBASE_API_KEY), {
@@ -103,13 +124,12 @@ function signIn_(p) {
   return JSON.parse(res.getContentText()).idToken;
 }
 
-function listDocs_(p, token, collection) {
+function listDocs_(p, auth, collection) {
   var out = [], pageToken = '';
   do {
-    var url = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(p.FIREBASE_PROJECT_ID) +
-      '/databases/(default)/documents/' + collection + '?pageSize=300' +
+    var url = docsUrl_(p) + '/' + collection + '?pageSize=300' +
       (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
-    var res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    var res = UrlFetchApp.fetch(url, { headers: auth.headers, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) throw new Error(collection + ' 읽기 실패 (코드 ' + res.getResponseCode() + ')');
     var body = JSON.parse(res.getContentText());
     (body.documents || []).forEach(function (d) {
@@ -182,9 +202,9 @@ function buildGrid(groups, records, title) {
   sorted.forEach(function (g) {
     addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }));
   });
-  // 삭제된 목장이라도 기록이 있으면 아래에 남겨요
+  // 목장 목록에 없는 기록(삭제된 목장, 다른 해 목장)도 기록에 남은 목장 이름 그대로 아래에 남겨요
   records.forEach(function (r) {
-    if (r.gid && !seenGroup[r.gid]) addGroup(r.gid, (r.groupName || '삭제된 목장') + ' (삭제됨)', []);
+    if (r.gid && !seenGroup[r.gid]) addGroup(r.gid, r.groupName || '이름 없는 목장', []);
   });
 
   // 열: 기록이 있는 달마다 그 달의 주일 + (주일이 아닌 날 기록), 마지막 기록 날짜까지

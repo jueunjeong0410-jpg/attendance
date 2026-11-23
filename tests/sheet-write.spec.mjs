@@ -20,8 +20,8 @@ const records = [
   { date: '2026-11-22', gid: 'g02', present: ['라은혜'], worship: [], absent: ['마다온'], guests: [] },
 ];
 
-function run(ss, recs = records) {
-  const ctx = makeAppsScriptGlobals({ ss, groups, records: recs });
+function run(ss, recs = records, opt = {}) {
+  const ctx = makeAppsScriptGlobals({ ss, groups: opt.groups || groups, records: recs, ...opt });
   vm.createContext(ctx);
   vm.runInContext(code, ctx);
   ctx.updateAttendanceSheet();
@@ -78,4 +78,36 @@ test('시트 쓰기: 목장별 방문자 수 줄은 없다 (4번째 줄 합계�
   expect(names).toEqual(['가목자', '나하늘', '다소망', '라은혜', '마다온']);
   const col = [...Array(12).keys()].map(i => i + 1).find(c => sh.value(2, c) === '11/15');
   expect(sh.value(4, col)).toBe(1);               // 11/15 방문자 1명 (이름으로 적은 손님)
+});
+
+test('연도별 시트: 그 해 목장만 쓰고, 지난해 시트는 기록에 남은 목장 이름·명단 그대로', () => {
+  const ss = makeSpreadsheet();
+  const gs = [
+    { id: 'g01', name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }] },            // 2026 (연도 표시 없음)
+    { id: '2027_g01', year: 2027, name: '가목장', order: 1, members: [{ name: '새목원' }] },               // 2027 새 목장 (같은 이름)
+  ];
+  const rs = [
+    { date: '2026-11-22', gid: 'g01', groupName: '가목장', present: ['가목자'], worship: [], absent: ['나하늘'], guests: [] },
+    { date: '2027-01-03', gid: '2027_g01', groupName: '가목장', present: ['새목원'], worship: [], absent: [], guests: [] },
+  ];
+  run(ss, rs, { groups: gs, now: '2027-01-05' });
+  const names = (sh) => { const out = []; for (let r = 5; r < 20; r++) { const v = sh.value(r, 2); if (v) out.push(v); } return out; };
+  expect(names(ss.getSheetByName('2026 출석현황'))).toEqual(['가목자', '나하늘']);   // 2027 명단이 섞이지 않음
+  expect(names(ss.getSheetByName('2027 출석현황'))).toEqual(['새목원']);
+});
+
+test('Firebase 접속: 비밀번호 없이 스크립트 주인의 구글 로그인으로 읽는다', () => {
+  const ss = makeSpreadsheet();
+  const ctx = run(ss, records, { password: false });
+  expect(ctx.calls.some(c => c.url.includes('signInWithPassword'))).toBe(false);
+  expect(ctx.calls.every(c => c.auth === 'Bearer fake-oauth')).toBe(true);
+  expect(ss.getSheetByName('2026 출석현황')).not.toBeNull();
+});
+
+test('Firebase 접속: 구글 로그인이 안 되면 예전 방식(보기 계정)으로 읽고, 둘 다 안 되면 분명한 오류', () => {
+  const ss = makeSpreadsheet();
+  const ctx = run(ss, records, { oauth: false });
+  expect(ctx.calls.some(c => c.url.includes('signInWithPassword'))).toBe(true);
+  expect(ss.getSheetByName('2026 출석현황')).not.toBeNull();
+  expect(() => run(makeSpreadsheet(), records, { oauth: false, password: false })).toThrow(/Firebase에 접속하지 못했어요/);
 });

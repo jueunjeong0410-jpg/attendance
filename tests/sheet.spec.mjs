@@ -58,7 +58,7 @@ test('시트: 명단에서 빠진 사람, 삭제된 목장도 과거 기록은 �
   const names = values.slice(4).map(r => r[1]);
   expect(names).toEqual(['가목자', '옛목원', '바다온']);
   expect(values.find(r => r[1] === '옛목원')[values[1].indexOf('11/22')]).toBe('X');
-  expect(values.find(r => r[1] === '바다온')[0]).toContain('삭제됨');
+  expect(values.find(r => r[1] === '바다온')[0]).toBe('없어진목장');   // 기록에 남은 목장 이름 그대로
 });
 
 test('시트: 기록이 하나도 없으면 머리글만 있다', () => {
