@@ -207,30 +207,108 @@ test('새가족 탭: 보기 계정(예전 방식)으로 접속하면 연락처�
   expect(ss.getSheetByName('새가족')).toBeNull();
 });
 
-test('알림 메일: 처음 켤 때 있던 새가족은 보내지 않고, 그다음 등록부터 한 번씩만 보낸다', () => {
-  const props = { NOTIFY_EMAILS: 'leader@fake.test, pastor@fake.test' };
+test('새가족 알림(회계팀): 처음 켤 때 있던 새가족은 기록만, 그다음 등록부터 메일·푸시로 한 번씩 (전화·주소는 안 보냄)', () => {
+  const props = { NEWCOMER_EMAILS: 'acct@fake.test, acct2@fake.test', NEWCOMER_PUSH: 'fake-secret-topic' };
   let ctx = runNC(makeSpreadsheet(), { props });
-  expect(ctx.mails.length).toBe(0);                                                            // 처음엔 기록만
+  expect(ctx.mails.length + ctx.pushes.length).toBe(0);
   expect(props.NOTIFIED_IDS).toContain('m_20030405_신소망');
-  const more = NEW.concat([{ id: 'm_20050505_새사람', name: '새사람', isNew: true, firstVisit: '2026-11-22', registeredAt: '2026-11-23' }]);
+  const more = NEW.concat([{ id: 'm_20050505_새사람', name: '새사람', birthYear: 2005, isNew: true, firstVisit: '2026-11-22', registeredAt: '2026-11-23' }]);
   ctx = runNC(makeSpreadsheet(), { props, members: more });
   expect(ctx.mails.length).toBe(1);
-  expect(ctx.mails[0].to).toBe('leader@fake.test,pastor@fake.test');
-  expect(ctx.mails[0].subject).toBe('[청년부] 새가족 등록: 새사람');
+  expect(ctx.mails[0].to).toBe('acct@fake.test,acct2@fake.test');
+  expect(ctx.mails[0].subject).toBe('[청년부] 새가족 새사람님 헌금봉투를 준비해 주세요');
   expect(ctx.mails[0].body).toContain('처음 온 날: 2026-11-22');
+  expect(ctx.pushes).toEqual([expect.objectContaining({ topic: 'fake-secret-topic', title: '[청년부] 새가족 새사람님 헌금봉투를 준비해 주세요' })]);
+  expect(ctx.mails[0].body + ctx.pushes[0].message).not.toMatch(/010-|가짜구/);
   ctx = runNC(makeSpreadsheet(), { props, members: more });
-  expect(ctx.mails.length).toBe(0);                                                            // 다시 보내지 않음
+  expect(ctx.mails.length + ctx.pushes.length).toBe(0);                                        // 다시 보내지 않음
 });
 
-test('알림 메일: 받을 사람이 없으면 기록만, 보내기 실패하면 다음에 다시 보낸다', () => {
+test('새가족 알림: 받을 곳이 없으면 기록만, 보내기가 모두 실패하면 다음에 다시 보낸다', () => {
   const props = { NOTIFIED_IDS: '' };
   const one = [{ id: 'm_1', name: '가', isNew: true }], two = one.concat([{ id: 'm_2', name: '나', isNew: true }]);
   let ctx = runNC(makeSpreadsheet(), { props, members: one });
   expect(ctx.mails.length).toBe(0);
-  expect(props.NOTIFIED_IDS).toContain('m_1');                                                 // 받을 사람 없을 때 등록 → 나중에 몰려 가지 않음
-  props.NOTIFY_EMAILS = 'leader@fake.test';
+  expect(props.NOTIFIED_IDS).toContain('m_1');
+  props.NEWCOMER_EMAILS = 'acct@fake.test';
   ctx = runNC(makeSpreadsheet(), { props, members: two, mailFail: true });
-  expect(props.NOTIFIED_IDS).not.toContain('m_2');                                             // 실패 → 기록 안 함
+  expect(props.NOTIFIED_IDS).not.toContain('m_2');
   ctx = runNC(makeSpreadsheet(), { props, members: two });
-  expect(ctx.mails.map(m => m.subject)).toEqual(['[청년부] 새가족 등록: 나']);
+  expect(ctx.mails.map(m => m.subject)).toEqual(['[청년부] 새가족 나님 헌금봉투를 준비해 주세요']);
+});
+
+/* ---------- 주일 출석 미제출 알림 ---------- */
+const G2 = [{ id: 'g01', name: '가목장', leader: '가목자', order: 1 }, { id: 'g02', name: '나목장', leader: '나목자', order: 2 },
+  { id: '2025_g09', year: 2025, name: '옛목장', order: 9 }];
+function ctxFor(opt) { const c = makeAppsScriptGlobals({ ss: makeSpreadsheet(), groups: G2, password: false, ...opt }); vm.createContext(c); vm.runInContext(code, c); return c; }
+
+test('미제출 알림: 일요일에 아직 안 낸 올해 목장만 목자들에게 (메일·푸시)', () => {
+  const props = { REMIND_EMAILS: 'mokja@fake.test', REMIND_PUSH: 'fake-mokja-topic' };
+  const c = ctxFor({ now: '2026-11-22', props, records: [{ date: '2026-11-22', gid: 'g01' }, { date: '2026-11-15', gid: 'g02' }] });
+  expect(c.remindUnsubmitted()).toBe('sent 1');
+  expect(c.mails[0].subject).toBe('[청년부] 오늘 출석체크를 부탁드려요 (1개 목장)');
+  expect(c.mails[0].body).toContain('나목장(나목자)');
+  expect(c.mails[0].body).not.toContain('가목장');
+  expect(c.pushes[0].topic).toBe('fake-mokja-topic');
+});
+
+test('미제출 알림: 모두 냈거나 일요일이 아니면 보내지 않는다', () => {
+  const props = { REMIND_EMAILS: 'mokja@fake.test' };
+  let c = ctxFor({ now: '2026-11-22', props, records: [{ date: '2026-11-22', gid: 'g01' }, { date: '2026-11-22', gid: 'g02' }] });
+  expect(c.remindUnsubmitted()).toBe('all-done');
+  c = ctxFor({ now: '2026-11-23', props, records: [] });
+  expect(c.remindUnsubmitted()).toBe('not-sunday');
+  expect(c.mails.length).toBe(0);
+});
+
+test('미제출 알림 켜기: 매주 일요일 15시 30분 무렵(한국 시간) 예약, 여러 번 눌러도 하나', () => {
+  const c = ctxFor({});
+  c.turnOnSundayReminder(); c.turnOnSundayReminder();
+  expect(c.triggers.length).toBe(1);
+  expect(c.triggers[0].fn).toBe('remindUnsubmitted');
+  expect(c.triggers[0].spec).toEqual([['timeBased'], ['onWeekDay', 'SUNDAY'], ['atHour', 15], ['nearMinute', 30], ['inTimezone', 'Asia/Seoul']]);
+});
+
+/* ---------- 출결버스 출석 가져오기 ---------- */
+const CB_HEAD = ['번호', '이름', '출', '결'].concat(Array.from({ length: 31 }, (_, i) => String(i + 1))).concat(['총시간']);
+const cbRow = (no, name, days) => [no, name, '', ''].concat(Array.from({ length: 31 }, (_, i) => (days.includes(i + 1) ? '등(13:56)하(미등록)' : '-'))).concat(['']);
+const CB = [['2026-11'], CB_HEAD,
+  cbRow('1', '가하늘', [1, 5, 8]),        // 5일은 목요일 → 안 가져옴
+  cbRow('2', '다은혜', [15]),
+  cbRow('3', '다은혜', [22]),              // 동명이인: 번호로 구분
+  cbRow('4', '모르는사람', [22]),
+  cbRow('5', '안온사람', []),
+];
+const ROSTER = [HEAD, row(1, '가하늘', '1996-02-15', '', '1012345678'), row(2, '다은혜', '2001-06-28', '', '1011112222'), row(3, '다은혜', '2005-03-27', '', '1033334444')];
+const CB_MEMBERS = [{ id: 'm_19960215_가하늘', name: '가하늘' }, { id: 'm_20010628_다은혜', name: '다은혜' }, { id: 'm_20050327_다은혜', name: '다은혜' }];
+
+test('출결버스 표 → 주일별 출석: 주일만, 동명이인은 번호로, 못 찾은 사람은 따로', () => {
+  const c = ctxFor({});
+  const r = JSON.parse(JSON.stringify(c.checkbusToWelcome(CB, '2026-11', c.rosterIdsByNo(ROSTER), {})));
+  expect(r.byDate).toEqual({ '2026-11-01': { m_19960215_가하늘: '가하늘' }, '2026-11-08': { m_19960215_가하늘: '가하늘' },
+    '2026-11-15': { m_20010628_다은혜: '다은혜' }, '2026-11-22': { m_20050327_다은혜: '다은혜' }, '2026-11-29': {} });
+  expect(r.unmatched).toEqual(['모르는사람']);
+  expect(() => c.checkbusToWelcome(CB, '', {}, {})).toThrow(/연월/);
+});
+
+test('출결버스 가져오기: 새가족팀 출석에 더하고(기존 체크 유지), 다시 해도 중복 없음, 시트도 업데이트', () => {
+  const ss = makeSpreadsheet(['전체인원', '출결버스 가져오기'], { '전체인원': ROSTER, '출결버스 가져오기': CB });
+  const c = makeAppsScriptGlobals({ ss, password: false, collections: { members: CB_MEMBERS,
+    welcome: [{ id: '2026-11-22', date: '2026-11-22', checked: { m_새가족: { name: '새가족', at: 'x' } } }] } });
+  vm.createContext(c); vm.runInContext(code, c);
+  const msg = c.importCheckbus();
+  expect(msg).toContain('출석 4건');
+  expect(msg).toContain('모르는사람');
+  const w = c.commits[0].writes;
+  expect(w.map(x => x.update.name.split('/').pop()).sort()).toEqual(['2026-11-01', '2026-11-08', '2026-11-15', '2026-11-22']);
+  const d22 = w.find(x => x.update.name.endsWith('2026-11-22')).update.fields.checked.mapValue.fields;
+  expect(Object.keys(d22).sort()).toEqual(['m_20050327_다은혜', 'm_새가족']);              // 기존 체크 유지
+  expect(ss.getSheetByName('분기별통계')).not.toBeNull();                                    // 가져온 뒤 시트 업데이트
+});
+
+test('출결버스 가져오기: 스크립트 주인의 구글 로그인이 아니면 하지 않는다', () => {
+  const ss = makeSpreadsheet(['전체인원', '출결버스 가져오기'], { '전체인원': ROSTER, '출결버스 가져오기': CB });
+  const c = makeAppsScriptGlobals({ ss, oauth: false });
+  vm.createContext(c); vm.runInContext(code, c);
+  expect(() => c.importCheckbus()).toThrow(/구글 로그인으로만/);
 });

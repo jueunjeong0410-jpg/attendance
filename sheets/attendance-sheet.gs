@@ -15,8 +15,13 @@
  *   (예전 방식) 구글 로그인이 안 되면 스크립트 속성의 FIREBASE_API_KEY·VIEWER_EMAIL·VIEWER_PASSWORD로 로그인해요.
  *
  * 분기별 통계: '분기별통계' 탭을 맨 앞에 두고 분기마다 한 줄씩 채워요. 계산은 'report' 파일(앱의 report.js와 같은 내용)에 있어요.
- * 새가족: 앱에서 '새가족 등록'을 하면 '새가족' 탭(두 번째)에 인적사항이 올라가고,
- *   스크립트 속성 NOTIFY_EMAILS(쉼표로 여러 명)에 적은 사람에게 알림 메일이 가요.
+ * 새가족: 앱에서 '새가족 등록'을 하면 '새가족' 탭(두 번째)에 인적사항이 올라가요.
+ * 알림 (메일·휴대폰 푸시, 둘 다 무료):
+ *   1) 새가족 등록 → 회계팀에 헌금봉투 준비 부탁   스크립트 속성 NEWCOMER_EMAILS / NEWCOMER_PUSH
+ *   2) 주일 15:30 무렵 출석 미제출 목장 → 목자들에게   스크립트 속성 REMIND_EMAILS / REMIND_PUSH
+ *   _EMAILS 는 메일 주소(쉼표로 여러 명), _PUSH 는 ntfy 앱의 비밀 채널 이름이에요. 비워 두면 그 방법은 안 보내요.
+ * 출결버스 가져오기: '출결버스 가져오기' 탭에 출결버스 월별 출결조회 표를 붙여 넣고 메뉴를 누르면
+ *   주일 출석이 새가족팀 출석 체크로 들어가요(공식 출석에 반영).
  *
  * 주의: 연도별 출석현황 시트와 분기별통계 탭은 업데이트할 때마다 새로 그려져요. 직접 적은 내용은 지워져요.
  */
@@ -30,8 +35,11 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('출석')
     .addItem('지금 업데이트', 'updateAttendanceSheet')
     .addItem('1시간마다 자동 업데이트 켜기', 'turnOnHourlyUpdate')
+    .addItem('주일 15:30 출석 미제출 알림 켜기', 'turnOnSundayReminder')
     .addSeparator()
     .addItem('교인 명단 가져오기 (전체인원 탭 → 앱)', 'importRoster')
+    .addItem('출결버스 출석 가져오기 (출결버스 가져오기 탭 → 앱)', 'importCheckbus')
+    .addItem('알림 시험 보내기', 'testAlerts')
     .addToUi();
 }
 
@@ -65,7 +73,7 @@ function updateAttendanceSheet() {
     listDocs_(p, token, 'contacts').forEach(function (c) { contacts[c.id] = c; });
     var nf = writeNewcomerSheet_(buildNewcomerRows(members, contacts, records, welcomes));
     ss.setActiveSheet(nf); ss.moveActiveSheet(2); front = 2;
-    notifyNewcomers_(p, members, contacts);
+    notifyNewcomers_(p, members);
   }
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
@@ -526,40 +534,178 @@ function writeNewcomerSheet_(rows) {
   return sh;
 }
 
-/* ---------- 새가족 등록 알림 메일 ----------
- * 스크립트 속성 NOTIFY_EMAILS 에 받을 사람 메일 주소(쉼표로 여러 명)를 적어 두면,
- * 새가족이 등록될 때마다 한 번씩 메일이 가요. 보낸 사람은 스크립트 주인 Gmail이에요.
+/* ---------- 알림: 메일 + 휴대폰 푸시(ntfy) ----------
+ * 메일: 스크립트 주인 Gmail로 보내요(하루 100통까지 무료).
+ * 휴대폰 푸시: 무료 앱 ntfy(아이폰·안드로이드)에서 비밀 채널 이름을 '구독'한 사람에게 바로 알림이 떠요.
+ *   채널 이름을 아는 사람은 누구나 받을 수 있으니, 길고 추측하기 어려운 이름을 쓰고 푸시에는 전화번호·주소를 넣지 않아요.
+ */
+function splitList_(v) { return String(v || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
+function sendAlert_(emails, topic, title, body) {
+  var ok = 0, errs = [];
+  if (emails.length) {
+    try { MailApp.sendEmail({ to: emails.join(','), subject: title, body: body }); ok++; } catch (e) { errs.push('메일: ' + e); }
+  }
+  if (topic) {
+    try {
+      var res = UrlFetchApp.fetch('https://ntfy.sh', { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        payload: JSON.stringify({ topic: topic, title: title, message: body.slice(0, 1000), tags: ['church'] }) });
+      if (res.getResponseCode() === 200) ok++; else errs.push('푸시: 코드 ' + res.getResponseCode());
+    } catch (e) { errs.push('푸시: ' + e); }
+  }
+  if (errs.length) console.error('알림 일부 실패: ' + errs.join(' / '));
+  return { sent: ok, failed: errs.length > 0 && ok === 0 };
+}
+
+/* 1) 새가족 등록 → 회계팀 (헌금봉투)
  * 이미 알린 사람은 NOTIFIED_IDS 에 기록해서 다시 보내지 않아요.
- * 처음 켤 때 있던 사람, 받을 사람이 아직 없을 때 등록된 사람은 보내지 않고 기록만 해요(나중에 한꺼번에 몰려 가지 않게).
- * 메일 보내기가 실패해도 시트 업데이트는 계속하고, 실패한 사람은 다음 업데이트 때 다시 보내요.
+ * 처음 켤 때 있던 사람, 받을 곳이 아직 없을 때 등록된 사람은 보내지 않고 기록만 해요(나중에 한꺼번에 몰려 가지 않게).
+ * 보내기가 모두 실패하면 기록하지 않아서 다음 업데이트 때 다시 보내요.
  */
 function newcomersToNotify(members, notified) {
   return members.filter(function (m) { return m.isNew && !notified[m.id]; });
 }
-function notifyNewcomers_(p, members, contacts) {
+function newcomerMessage(m) {
+  return {
+    title: '[청년부] 새가족 ' + m.name + '님 헌금봉투를 준비해 주세요',
+    body: '새가족이 등록됐어요. 헌금봉투를 만들어 주세요.\n\n이름: ' + m.name +
+      (m.birthYear ? '\n출생연도: ' + m.birthYear : '') + '\n처음 온 날: ' + (m.firstVisit || '') + '\n등록한 날: ' + (m.registeredAt || '')
+  };
+}
+function notifyNewcomers_(p, members) {
   var props = PropertiesService.getScriptProperties();
-  var to = String(p.NOTIFY_EMAILS || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+  var emails = splitList_(p.NEWCOMER_EMAILS), topic = String(p.NEWCOMER_PUSH || '').trim();
   var raw = props.getProperty('NOTIFIED_IDS');
   var notified = {};
   (raw ? raw.split(',') : []).forEach(function (id) { if (id) notified[id] = true; });
   var todo = newcomersToNotify(members, notified);
   if (!todo.length) return 0;
   var sent = 0, failed = {};
-  if (raw !== null && to.length) {
+  if (raw !== null && (emails.length || topic)) {
     todo.forEach(function (m) {
-      var c = contacts[m.id] || {};
-      try { MailApp.sendEmail({
-        to: to.join(','),
-        subject: '[청년부] 새가족 등록: ' + m.name,
-        body: '새가족이 등록됐어요.\n\n' +
-          '이름: ' + m.name + '\n생년월일: ' + (c.birth || '') + '\n전화번호: ' + (c.phone || '') + '\n주소: ' + (c.address || '') +
-          '\n처음 온 날: ' + (m.firstVisit || '') + '\n등록한 날: ' + (m.registeredAt || '') + (c.memo ? '\n메모: ' + c.memo : '') +
-          '\n\n구글 시트 \'새가족\' 탭에서도 볼 수 있어요.\n' + SpreadsheetApp.getActive().getUrl() +
-          '\n\n※ 개인정보가 담긴 메일이에요. 다른 사람에게 전달하지 말아 주세요.'
-      }); sent++; } catch (e) { failed[m.id] = true; console.error('알림 메일 실패: ' + e); }
+      var msg = newcomerMessage(m), r = sendAlert_(emails, topic, msg.title, msg.body);
+      if (r.failed) failed[m.id] = true; else sent++;
     });
   }
   todo.forEach(function (m) { if (!failed[m.id]) notified[m.id] = true; });
   props.setProperty('NOTIFIED_IDS', Object.keys(notified).join(','));
   return sent;
+}
+
+/* 2) 주일 15:30 무렵 출석 미제출 → 목자들
+ * 'turnOnSundayReminder'가 매주 일요일 15시 30분 무렵(구글 사정으로 ±15분) 실행되게 예약해요.
+ */
+function unsubmittedGroups(groups, records, date) {
+  var y = Number(date.slice(0, 4)), done = {};
+  records.forEach(function (r) { if (r.date === date) done[r.gid] = true; });
+  return groups.filter(function (g) { return groupYear(g) === y && !done[g.id]; })
+    .sort(function (a, b) { return (a.order == null ? 99 : a.order) - (b.order == null ? 99 : b.order); });
+}
+function remindUnsubmitted() {
+  var today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+  if (Utilities.formatDate(new Date(), 'Asia/Seoul', 'u') !== '7') return 'not-sunday';   // u: 1=월 … 7=일
+  var p = props_(), auth = auth_(p);
+  var miss = unsubmittedGroups(listDocs_(p, auth, 'groups'), listDocs_(p, auth, 'attendance'), today);
+  if (!miss.length) return 'all-done';
+  var names = miss.map(function (g) { return g.name + (g.leader ? '(' + g.leader + ')' : ''); });
+  sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(),
+    '[청년부] 오늘 출석체크를 부탁드려요 (' + miss.length + '개 목장)',
+    '아직 출석을 내지 않은 목장: ' + names.join(', ') + '\n앱에서 출석체크 → 제출해 주세요.\nhttps://jueunjeong0410-jpg.github.io/attendance/#check');
+  return 'sent ' + miss.length;
+}
+function turnOnSundayReminder() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === 'remindUnsubmitted'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('remindUnsubmitted').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(15).nearMinute(30)
+    .inTimezone('Asia/Seoul').create();
+  try { SpreadsheetApp.getActive().toast('매주 일요일 15:30 무렵 출석 미제출 알림이 켜졌어요.', '출석'); } catch (e) {}
+}
+// 설정한 곳으로 시험 알림을 하나씩 보내 봐요 (개인정보 없음)
+function testAlerts() {
+  var p = props_();
+  var a = sendAlert_(splitList_(p.NEWCOMER_EMAILS), String(p.NEWCOMER_PUSH || '').trim(), '[청년부] 시험 알림 (회계팀)', '새가족 헌금봉투 알림이 이렇게 와요.');
+  var b = sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(), '[청년부] 시험 알림 (목자)', '주일 출석 미제출 알림이 이렇게 와요.');
+  var msg = '회계팀 ' + a.sent + '곳, 목자 ' + b.sent + '곳으로 보냈어요.';
+  try { SpreadsheetApp.getActive().toast(msg, '알림'); } catch (e) {}
+  return msg;
+}
+
+/* ---------- 출결버스 출석 가져오기 ----------
+ * '출결버스 가져오기' 탭: A1에 연월(예: 2026-11), 그 아래에 출결버스 '출결조회' 표를 그대로 붙여 넣어요
+ *   (번호 | 이름 | 출 | 결 | 1 | 2 | … | 31). '등(13:56)…'처럼 적힌 칸이 출석이에요.
+ * 주일만 가져와서 그날 새가족팀 출석 체크에 더해요(이미 있는 체크는 그대로). 여러 번 해도 중복되지 않아요.
+ * 사람 찾기: 번호 → '전체인원' 탭의 같은 번호 사람(동명이인도 정확히), 없으면 교인 명단에 하나뿐인 이름.
+ */
+var CHECKBUS_SHEET = '출결버스 가져오기';
+function checkbusToWelcome(rows, ym, idByNo, uniq) {
+  ym = ymText_(ym);
+  if (!/^\d{4}-\d{2}$/.test(ym)) throw new Error("A1 칸에 연월을 '2026-11'처럼 적어 주세요.");
+  var h = -1;
+  rows.forEach(function (r, i) { if (h < 0 && String(r[0]).trim() === '번호') h = i; });
+  if (h < 0) throw new Error("'번호'로 시작하는 머리글 줄을 찾지 못했어요.");
+  var head = rows[h].map(function (x) { return String(x).trim(); });
+  var nameCol = head.indexOf('이름'), dayCol = {};
+  head.forEach(function (x, j) { if (/^\d{1,2}$/.test(x)) dayCol[Number(x)] = j; });
+  var sundays = sundaysOfMonth_(ym), byDate = {}, unmatched = [];
+  sundays.forEach(function (d) { byDate[d] = {}; });
+  rows.slice(h + 1).forEach(function (r) {
+    var name = String(r[nameCol] || '').trim(); if (!name) return;
+    var id = idByNo[String(r[0]).trim()] || uniq[name];
+    var came = sundays.filter(function (d) { var j = dayCol[Number(d.slice(8))]; return j != null && /^등/.test(String(r[j]).trim()); });
+    if (!came.length) return;
+    if (!id) { unmatched.push(name); return; }
+    came.forEach(function (d) { byDate[d][id] = name; });
+  });
+  return { byDate: byDate, unmatched: unmatched };
+}
+// '전체인원' 탭: 번호 → 교인 id (가져오기와 같은 규칙 m_생년월일_이름)
+function rosterIdsByNo(rv) {
+  var head = (rv[0] || []).map(function (h) { return String(h).trim(); });
+  var no = head.indexOf('번호'), nm = head.indexOf('이름'), bd = head.indexOf('생년월일'), out = {};
+  if (no < 0 || nm < 0) return out;
+  rv.slice(1).forEach(function (r, i) {
+    var name = String(r[nm] || '').trim(); if (!name) return;
+    out[String(r[no]).trim()] = memberId(name, bd < 0 ? '' : ymd_(r[bd]), i + 2);
+  });
+  return out;
+}
+function ymText_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM');
+  var m = String(v || '').match(/(\d{4})\D+(\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) : String(v || '');
+}
+function importCheckbus() {
+  var p = props_(), auth = auth_(p);
+  if (!auth.admin) throw new Error('출결버스 가져오기는 스크립트 주인의 구글 로그인으로만 할 수 있어요.');
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(CHECKBUS_SHEET);
+  if (!sh) throw new Error("'" + CHECKBUS_SHEET + "' 탭이 없어요.");
+  var rows = sh.getDataRange().getValues();
+  // 번호 → 교인 id ('전체인원' 탭의 번호 칸)
+  var idByNo = {}, roster = ss.getSheetByName(ROSTER_SHEET);
+  if (roster) idByNo = rosterIdsByNo(roster.getDataRange().getValues());
+  var members = listDocs_(p, auth, 'members'), have = {};
+  members.forEach(function (m) { have[m.id] = true; });
+  Object.keys(idByNo).forEach(function (no) { if (!have[idByNo[no]]) delete idByNo[no]; });
+  var res = checkbusToWelcome(rows, rows[0][0], idByNo, uniqueNames(members));
+  var existing = {};
+  listDocs_(p, auth, 'welcome').forEach(function (w) { existing[w.id] = w; });
+  var base = 'projects/' + p.FIREBASE_PROJECT_ID + '/databases/(default)/documents/', writes = [], total = 0, now = new Date().toISOString();
+  Object.keys(res.byDate).forEach(function (d) {
+    var ids = Object.keys(res.byDate[d]); if (!ids.length) return;
+    var checked = (existing[d] && existing[d].checked) || {}, added = 0;
+    ids.forEach(function (id) { if (!checked[id]) { checked[id] = { name: res.byDate[d][id], at: '출결버스' }; added++; } });
+    total += added;
+    var cf = {};
+    Object.keys(checked).forEach(function (id) { cf[id] = { mapValue: { fields: toFields_({ name: checked[id].name || '', at: checked[id].at || '' }) } }; });
+    writes.push({ update: { name: base + 'welcome/' + d, fields: { date: { stringValue: d }, checked: { mapValue: { fields: cf } }, updatedAt: { stringValue: now } } } });
+  });
+  if (writes.length) {
+    var r = UrlFetchApp.fetch(docsUrl_(p).replace(/\/documents$/, '/documents:commit'), {
+      method: 'post', contentType: 'application/json', headers: auth.headers, muteHttpExceptions: true, payload: JSON.stringify({ writes: writes }) });
+    if (r.getResponseCode() !== 200) throw new Error('저장 실패 (코드 ' + r.getResponseCode() + ')');
+  }
+  var msg = '주일 ' + writes.length + '번, 출석 ' + total + '건을 새로 넣었어요.' + (res.unmatched.length ? ' 명단에서 못 찾은 사람: ' + res.unmatched.join(', ') : '');
+  try { ss.toast(msg, '출결버스'); } catch (e) {}
+  updateAttendanceSheet();
+  return msg;
 }

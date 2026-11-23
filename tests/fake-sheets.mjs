@@ -87,7 +87,7 @@ export function makeAppsScriptGlobals({ ss, groups = [], records = [], collectio
   const data = { groups, attendance: records, members: [], contacts: [], welcome: [], ...collections };
   const calls = [];   // 테스트에서 어떤 요청을 보냈는지 확인용
   const g = {
-    calls, commits: [], mails: [], props,
+    calls, commits: [], mails: [], pushes: [], props, triggers: [],
     SpreadsheetApp: {
       getActive: () => Object.assign(ss, { getUrl: () => 'https://docs.google.com/spreadsheets/d/fake' }),
       newConditionalFormatRule: () => chain({ build: () => ({}) }),
@@ -100,19 +100,22 @@ export function makeAppsScriptGlobals({ ss, groups = [], records = [], collectio
       setProperty: (k, v) => { props[k] = v; },
     }) },
     MailApp: { sendEmail: (m) => { if (mailFail) throw new Error('메일 실패'); g.mails.push(m); } },
-    ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null) },
+    ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null), WeekDay: { SUNDAY: 'SUNDAY' }, getProjectTriggers: () => g.triggers, deleteTrigger: (t) => { g.triggers = g.triggers.filter(x => x !== t); },
+      newTrigger: (fn) => { const t = { fn, spec: [] , getHandlerFunction: () => fn }; const b = new Proxy({}, { get: (_o, k) => (k === 'create' ? () => { g.triggers.push(t); return t; } : (...a) => { t.spec.push([k, ...a]); return b; }) }); return b; } },
     UrlFetchApp: {
       fetch(url, opt = {}) {
         calls.push({ url, auth: opt.headers && opt.headers.Authorization, method: opt.method || 'get' });
         const ok = (body) => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify(body) });
         if (url.includes('signInWithPassword')) return password ? ok({ idToken: 'fake-token' }) : { getResponseCode: () => 400, getContentText: () => '{}' };
         if (opt.headers && opt.headers.Authorization === 'Bearer fake-oauth' && !oauth) return { getResponseCode: () => 403, getContentText: () => '{}' };
+        if (url === 'https://ntfy.sh') { g.pushes.push(JSON.parse(opt.payload)); return ok({ id: 'x' }); }
         if (url.includes(':commit')) { const b = JSON.parse(opt.payload); g.commits.push(b); return ok({ writeResults: b.writes.map(() => ({})) }); }
         const col = (url.match(/documents\/([a-z]+)/) || [])[1];
         return ok({ documents: (data[col] || []).map(doc(col)) });
       },
     },
-    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : '11/23 02:00') },
+    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : fmt === 'yyyy-MM' ? now.slice(0, 7)
+      : fmt === 'u' ? String(new Date(now + 'T12:00:00Z').getUTCDay() || 7) : '11/23 02:00') },
     console: { error() {}, log() {} },
   };
   return g;
