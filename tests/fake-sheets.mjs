@@ -55,11 +55,13 @@ function makeRange(sh, r, c, nr, nc) {
   return chain(rg);
 }
 
-export function makeSpreadsheet(existingSheetNames = []) {
+export function makeSpreadsheet(existingSheetNames = [], sheetValues = {}) {
+  const withData = (n) => { const sh = makeSheet(n); sh.getDataRange = () => ({ getValues: () => sheetValues[n] || [] }); return sh; };
   const ss = {
-    sheets: existingSheetNames.map(makeSheet),
+    sheets: existingSheetNames.map(withData),
     active: null,
     getSheetByName: (n) => ss.sheets.find(s => s.name === n) || null,
+    getSheets: () => ss.sheets.slice(),
     insertSheet: (n) => { const s = makeSheet(n); ss.sheets.push(s); return s; },
     setActiveSheet: (s) => { ss.active = s; return s; },
     moveActiveSheet: (pos) => { ss.sheets = ss.sheets.filter(s => s !== ss.active); ss.sheets.splice(pos - 1, 0, ss.active); },

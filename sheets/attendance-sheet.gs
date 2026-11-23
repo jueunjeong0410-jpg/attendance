@@ -26,6 +26,8 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('출석')
     .addItem('지금 업데이트', 'updateAttendanceSheet')
     .addItem('1시간마다 자동 업데이트 켜기', 'turnOnHourlyUpdate')
+    .addSeparator()
+    .addItem('교인 명단 가져오기 (전체인원 탭 → 앱)', 'importRoster')
     .addToUi();
 }
 
@@ -315,4 +317,89 @@ function writeSheet_(grid, sheetName) {
     sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('X', '#fbe3dc', '#b3402a')]);
   }
   return sh;
+}
+
+/* ---------- 교인 명단 가져오기 (한 번만 쓰는 기능) ----------
+ * '전체인원' 탭(출결버스에서 내려받은 명단)을 앱의 교인 명단으로 옮겨요.
+ *   members  : 이름, 출생연도, 목장 힌트(시트의 '학교' 칸), 등록일   → 앱에 로그인한 모두가 봄
+ *   contacts : 전화번호, 주소, 생년월일, 메모                         → 새가족팀만 봄
+ * 이미 앱에 있는 사람(같은 문서 이름)은 건드리지 않아요. 그래서 여러 번 눌러도 중복되지 않아요.
+ * 스크립트 주인의 구글 로그인(관리자 권한)이 있어야 해요.
+ */
+var ROSTER_SHEET = '전체인원';
+
+function importRoster() {
+  var p = props_(), auth = auth_(p);
+  if (!auth.admin) throw new Error('명단 가져오기는 스크립트 주인의 구글 로그인으로만 할 수 있어요.');
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROSTER_SHEET);
+  if (!sh) throw new Error("'" + ROSTER_SHEET + "' 탭이 없어요.");
+  var plan = rosterToDocs(sh.getDataRange().getValues());
+  var have = {};
+  listDocs_(p, auth, 'members').forEach(function (m) { have[m.id] = true; });
+  var todo = plan.filter(function (x) { return !have[x.id]; });
+  var base = 'projects/' + p.FIREBASE_PROJECT_ID + '/databases/(default)/documents/';
+  for (var i = 0; i < todo.length; i += 200) {
+    var writes = [];
+    todo.slice(i, i + 200).forEach(function (x) {
+      writes.push({ update: { name: base + 'members/' + x.id, fields: toFields_(x.member) }, currentDocument: { exists: false } });
+      writes.push({ update: { name: base + 'contacts/' + x.id, fields: toFields_(x.contact) } });
+    });
+    var res = UrlFetchApp.fetch(docsUrl_(p).replace(/\/documents$/, '/documents:commit'), {
+      method: 'post', contentType: 'application/json', headers: auth.headers, muteHttpExceptions: true,
+      payload: JSON.stringify({ writes: writes })
+    });
+    if (res.getResponseCode() !== 200) throw new Error('명단 저장 실패 (코드 ' + res.getResponseCode() + ')');
+  }
+  var msg = '새로 ' + todo.length + '명을 앱에 넣었어요. (이미 있던 ' + (plan.length - todo.length) + '명은 그대로)';
+  try { SpreadsheetApp.getActive().toast(msg, '교인 명단'); } catch (e) {}
+  return msg;
+}
+
+// 전화번호: 시트에는 맨 앞 0이 빠져 있어요(1040994643) → 010-4099-4643
+function formatPhone(v) {
+  var d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+  if (d.length === 10 && d.charAt(0) === '1') d = '0' + d;
+  if (d.length === 11) return d.slice(0, 3) + '-' + d.slice(3, 7) + '-' + d.slice(7);
+  if (d.length === 10) return d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6);
+  return d;
+}
+function ymd_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd');
+  var m = String(v == null ? '' : v).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : '';
+}
+// 교인 문서 이름: m_생년월일_이름 (생일이 없으면 m_이름_줄번호). 앱에서 새로 등록할 때도 같은 규칙
+function memberId(name, birth, row) {
+  var n = String(name).replace(/[\/\s]+/g, '');
+  return birth ? 'm_' + birth.replace(/-/g, '') + '_' + n : 'm_' + n + '_' + row;
+}
+// 시트 값 → 앱에 넣을 문서 목록 (시트·Firebase와 무관한 순수 계산: 테스트 대상)
+function rosterToDocs(rows) {
+  var head = (rows[0] || []).map(function (h) { return String(h).trim(); });
+  var col = function (name) { return head.indexOf(name); };
+  var c = { name: col('이름'), birth: col('생년월일'), hint: col('학교'), phone: col('학생전화'), addr: col('주소'), memo: col('메모'), reg: col('등록일') };
+  if (c.name < 0) throw new Error("'이름' 칸을 찾지 못했어요.");
+  var get = function (r, k) { return c[k] < 0 ? '' : r[c[k]]; };
+  var out = [], seen = {};
+  rows.slice(1).forEach(function (r, i) {
+    var name = String(get(r, 'name') || '').trim();
+    if (!name) return;
+    var birth = ymd_(get(r, 'birth')), id = memberId(name, birth, i + 2);
+    if (seen[id]) return; seen[id] = true;
+    var member = { name: name, status: 'active', hint: String(get(r, 'hint') || '').trim().slice(0, 40), registeredAt: ymd_(get(r, 'reg')) };
+    if (birth) member.birthYear = Number(birth.slice(0, 4));
+    var contact = { phone: formatPhone(get(r, 'phone')), address: String(get(r, 'addr') || '').trim(), birth: birth, memo: String(get(r, 'memo') || '').trim() };
+    out.push({ id: id, member: member, contact: contact });
+  });
+  return out;
+}
+function toValue_(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  return { stringValue: String(v) };
+}
+function toFields_(o) {
+  var f = {};
+  Object.keys(o).forEach(function (k) { f[k] = toValue_(o[k]); });
+  return f;
 }
