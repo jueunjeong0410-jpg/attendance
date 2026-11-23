@@ -359,8 +359,94 @@ test('명단 수정: 교인 명단과 연결되고, 동명이인은 목자가 �
 });
 
 test('보기·목자 권한은 연락처(전화번호)를 읽을 수 없다', async ({ page }) => {
-  await seed(page, { members: FAKE_MEMBERS, contacts: { m_19960215_가하늘: { phone: '010-0000-0000' } } });
+  await seed(page, { members: FAKE_MEMBERS, contacts: { m_19960215_가하늘: { phone: '010-9999-1111' } } });
+  for (const pw of [EDIT_PW, VIEW_PW]) {
+    await page.goto('/');
+    await login(page, pw);
+    await expect(page.locator('#v-dashboard')).toBeVisible();
+    for (const h of ['#dashboard', '#check', '#welcome']) {
+      await page.goto('/' + h);
+      expect(await page.locator('body').innerText()).not.toContain('010-9999-1111');
+    }
+    const err = await page.evaluate(async () => { try { await window.__store.getContact('m_19960215_가하늘'); return 'read'; } catch (e) { return e.code; } });
+    expect(err).toBe('permission-denied');
+    await page.evaluate(() => window.__store.logout());
+  }
+});
+
+/* ---------- 새가족팀 페이지 ---------- */
+const FAKE_CONTACTS = { m_19960215_가하늘: { phone: '010-1234-5678', address: '가짜시 가짜동 1', birth: '1996-02-15', memo: '' } };
+
+test('새가족 탭은 새가족팀에게만 보인다', async ({ page }) => {
+  await page.goto('/');
   await login(page, EDIT_PW);
-  await expect(page.locator('#v-dashboard')).toBeVisible();
-  expect(await page.content()).not.toContain('010-0000-0000');
+  await expect(page.locator('#tabWelcome')).toBeHidden();
+  await page.goto('/#welcome');
+  await expect(page.locator('#welcomeBody')).toContainText('새가족팀 전용');
+  await expect(page.locator('#ws')).toHaveCount(0);
+});
+
+test('새가족팀: 이름 검색 → 출석 → 취소, 인원 수가 바로 바뀐다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  await login(page, NF_PW);
+  await expect(page.locator('#tabWelcome')).toBeVisible();
+  await page.click('#tabWelcome');
+  await page.fill('#ws', '은혜');
+  await expect(page.locator('#wRes .wr')).toHaveCount(2);                     // 동명이인 둘 다, 출생연도로 구분
+  await expect(page.locator('#wRes')).toContainText('01년생');
+  await expect(page.locator('#wRes')).toContainText('05년생');
+  await page.click('#wRes [data-chk="m_20050327_다은혜"]');
+  await expect(page.locator('#wN')).toHaveText('1');
+  await expect(page.locator('#wChk')).toContainText('다은혜');
+  await page.click('#wChk [data-chk="m_20050327_다은혜"]');                  // 취소
+  await expect(page.locator('#wN')).toHaveText('0');
+  await page.fill('#ws', '없는이름');
+  await expect(page.locator('#wRes')).toContainText('새가족 등록');
+});
+
+test('새가족팀: 이름을 누르면 전화번호(바로 걸기)·주소가 보인다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  await page.fill('#ws', '가하늘');
+  await page.click('#wRes [data-card="m_19960215_가하늘"]');
+  await expect(page.locator('#wCard a.tel')).toHaveAttribute('href', 'tel:01012345678');
+  await expect(page.locator('#wCard')).toContainText('가짜시 가짜동 1');
+});
+
+test('새가족 등록: 전화번호 필수, 등록하면 명단·연락처에 저장되고 오늘 출석도 체크, 중복 등록은 막힘', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  await page.click('#wRegBtn');
+  await page.fill('#rName', '신소망');
+  await page.fill('#rBirth', '2003-04-05');
+  await page.click('#rSave');
+  await expect(page.locator('#rMsg')).toContainText('전화번호');
+  await page.fill('#rPhone', '1055556666');                                   // 앞 0 없이 써도
+  await page.fill('#rAddr', '가짜구 가짜로 2');
+  await page.click('#rSave');
+  await expect(page.locator('#wN')).toHaveText('1');
+  const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  expect(demo.members['m_20030405_신소망']).toMatchObject({ name: '신소망', birthYear: 2003, isNew: true, status: 'active' });
+  expect(demo.members['m_20030405_신소망'].phone).toBeUndefined();          // 모두가 보는 명단엔 전화번호 없음
+  expect(demo.contacts['m_20030405_신소망']).toMatchObject({ phone: '010-5555-6666', address: '가짜구 가짜로 2', birth: '2003-04-05' });
+  // 같은 사람 다시 등록 → 막힘
+  await page.click('#wRegBtn');
+  await page.fill('#rName', '신소망');
+  await page.fill('#rBirth', '2003-04-05');
+  await page.fill('#rPhone', '010-5555-6666');
+  await page.click('#rSave');
+  await expect(page.locator('#rMsg')).toContainText('이미 등록된');
+});
+
+test('새가족팀: 지난 연도는 출석 체크·등록을 할 수 없다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, NF_PW);
+  await page.fill('#date', '2025-11-30');
+  await page.goto('/#welcome');
+  await expect(page.locator('#welcomeBody')).toContainText('지난 연도');
+  await expect(page.locator('#wRegBtn')).toHaveCount(0);
+  await page.fill('#ws', '가하늘');
+  await expect(page.locator('#wRes [data-chk]')).toHaveCount(0);
 });

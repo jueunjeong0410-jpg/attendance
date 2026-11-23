@@ -98,6 +98,10 @@ textarea#memo{min-height:84px}
 .toast.on{opacity:1}
 .empty{padding:24px;text-align:center;color:var(--mute);border:2px dashed var(--line);border-radius:14px}
 [hidden]{display:none!important}
+.wlist{display:grid;gap:6px;margin-bottom:14px}.wr{display:flex;align-items:center;gap:8px;justify-content:space-between;border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 4px}
+.wname{background:none;border:0;text-align:left;padding:6px 8px;cursor:pointer;flex:1}.card{margin-top:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
+.tel{font-weight:700;color:var(--green)}
 .links{display:grid;gap:4px;margin:-4px 0 12px}.lk{font-size:14px;padding:6px 10px;border-radius:8px;background:var(--panel)}
 .lk.warn{background:light-dark(#fff4dd,#3a2f14)}.lk.no{color:var(--mute)}.lk select{padding:2px 4px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px}
 @media(max-width:600px){.tally{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
@@ -115,6 +119,7 @@ textarea#memo{min-height:84px}
   <nav class="tabs">
     <a href="#dashboard" data-v="dashboard">대시보드</a>
     <a href="#check" data-v="check">출석체크</a>
+    <a href="#welcome" data-v="welcome" id="tabWelcome" hidden>새가족</a>
   </nav>
 </header>
 <main>
@@ -141,6 +146,7 @@ textarea#memo{min-height:84px}
     <div class="foot"><span class="note">출석 정보는 교인 외에 공유하지 말아 주세요.</span><button class="btn ghost sm" id="logoutD">로그아웃</button></div>
   </section>
   <section id="v-check" hidden><div id="checkBody"></div></section>
+  <section id="v-welcome" hidden><div id="welcomeBody"></div></section>
   <section id="v-login" hidden><div id="loginBody"></div></section>
 </main>
 <div class="toast" id="toast"></div>
@@ -226,6 +232,7 @@ if(!DEMO){
     checkOut:async(date,mid)=>{if(D.welcome[date])delete D.welcome[date].checked[mid];emit()},
     rangeDocs:async(col,from,to)=>Object.values(col==='welcome'?D.welcome:D.att).filter(x=>x.date>=from&&x.date<=to)
   };
+  window.__store=store;   // 체험 모드 전용: 테스트에서 권한 확인용 (실제 Firebase 모드에는 없음)
   const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 목자 <b>1234</b>, 보기 <b>0000</b>, 새가족팀 <b>5678</b>';
 }
 
@@ -397,26 +404,115 @@ function renderCheck(){
   $('#logout').onclick=()=>store.logout();
 }
 
+/* ---------- 새가족팀: 이름 검색 출석, 연락처, 새가족 등록 ---------- */
+let wq='',wOpen='',wReg=false;const cCache={};
+const memberIdFor=(name,birth)=>'m_'+birth.replace(/-/g,'')+'_'+name.replace(/[\/\s]+/g,'');   // 시트 가져오기와 같은 규칙
+const fmtPhone=v=>{let d=String(v||'').replace(/\D/g,'');if(d.length===10&&d[0]==='1')d='0'+d;
+  return d.length===11?d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7):d.length===10?d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6):''};
+const checked=()=>welcome?.checked||{};
+function renderWelcome(){
+  const box=$('#welcomeBody');
+  if(role!=='nf'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">새가족팀 전용이에요</h2><p>새가족팀 비밀번호로 들어와야 볼 수 있어요.</p></div>`;return}
+  if(typing('#v-welcome')&&box.querySelector('#ws')){drawWResults();drawWChecked();return}
+  const open=yearOpen(curYear()),n=Object.keys(checked()).length;
+  box.innerHTML=`<div class="ghead"><h2>새가족팀 출석 <span class="note">${date.replace(/-/g,'.')} 주일 · <b id="wN">${n}</b>명</span></h2>
+    ${open?'<button class="btn sm" id="wRegBtn">+ 새가족 등록</button>':''}</div>
+    ${open?'':'<p class="note">지난 연도 기록은 고칠 수 없어요. 보기만 할 수 있어요.</p>'}
+    <div id="wRegBox"></div>
+    <div class="field"><label for="ws">이름 검색</label><input type="search" id="ws" placeholder="이름 두세 글자" autocomplete="off" value="${esc(wq)}"></div>
+    <div id="wRes" class="wlist"></div>
+    <h3>오늘 출석 체크한 사람</h3><div id="wChk" class="wlist"></div>
+    <div id="wCard"></div>`;
+  $('#ws').oninput=e=>{wq=e.target.value;drawWResults()};
+  if(open)$('#wRegBtn').onclick=()=>{wReg=!wReg;drawWReg()};
+  drawWReg();drawWResults();drawWChecked();drawWCard();
+}
+const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(m.name)}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
+  ${yearOpen(curYear())?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
+function bindW(el){
+  el.querySelectorAll('[data-chk]').forEach(b=>b.onclick=async()=>{const id=b.dataset.chk,m=members.find(x=>x.id===id),on=!!checked()[id];b.disabled=true;
+    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?.name||'');toast(on?`${m?.name} 출석 취소`:`${m?.name} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
+  el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{wOpen=wOpen===b.dataset.card?'':b.dataset.card;drawWCard()});
+}
+function drawWResults(){const el=$('#wRes');if(!el)return;const q=wq.trim();
+  if(!q){el.innerHTML='';return}
+  const hit=members.filter(m=>m.name.includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ko')).slice(0,30);
+  el.innerHTML=hit.map(m=>wRow(m,!!checked()[m.id])).join('')||`<div class="empty">‘${esc(q)}’ 이름이 명단에 없어요. 처음 온 사람이면 ‘새가족 등록’을 눌러 주세요.</div>`;bindW(el)}
+function drawWChecked(){const el=$('#wChk');if(!el)return;const c=checked();
+  const list=Object.entries(c).map(([id,v])=>members.find(m=>m.id===id)||{id,name:v.name}).sort((a,b)=>String(c[a.id].at).localeCompare(String(c[b.id].at)));
+  $('#wN')&&($('#wN').textContent=list.length);
+  el.innerHTML=list.map(m=>wRow(m,true)).join('')||'<div class="empty">아직 체크한 사람이 없어요.</div>';bindW(el)}
+async function drawWCard(){const el=$('#wCard');if(!el)return;const id=wOpen;if(!id){el.innerHTML='';return}
+  const m=members.find(x=>x.id===id);if(!m){el.innerHTML='';return}
+  el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처"><p class="note">연락처 불러오는 중…</p></div>`;
+  let c=cCache[id];if(!c){try{c=cCache[id]=(await store.getContact(id))||{}}catch(e){el.innerHTML=`<div class="panel card"><p>${esc(errMsg(e))}</p></div>`;return}}
+  if(wOpen!==id)return;
+  const tel=String(c.phone||'').replace(/[^0-9+]/g,'');
+  el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처">
+    <div class="ghead"><h3 style="margin:0">${esc(m.name)} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
+    <dl class="kv"><dt>전화</dt><dd>${c.phone?`<a href="tel:${esc(tel)}" class="tel">${esc(c.phone)}</a>`:'<span class="note">없음</span>'}</dd>
+    <dt>주소</dt><dd>${esc(c.address||'')||'<span class="note">없음</span>'}</dd>
+    <dt>생일</dt><dd>${esc(c.birth||'')||'<span class="note">없음</span>'}</dd>
+    ${m.firstVisit?`<dt>처음 온 날</dt><dd>${esc(m.firstVisit)}</dd>`:''}${m.registeredAt?`<dt>등록일</dt><dd>${esc(m.registeredAt)}</dd>`:''}
+    ${c.memo?`<dt>메모</dt><dd>${esc(c.memo)}</dd>`:''}</dl>
+    <details><summary>연락처 고치기</summary>
+      <div class="field"><label for="cPhone">전화번호 (필수)</label><input id="cPhone" inputmode="tel" value="${esc(c.phone||'')}"></div>
+      <div class="field"><label for="cAddr">주소</label><input id="cAddr" value="${esc(c.address||'')}"></div>
+      <div class="field"><label for="cMemo">메모</label><textarea id="cMemo" rows="2">${esc(c.memo||'')}</textarea></div>
+      <div class="field"><label for="cStatus">상태</label><select id="cStatus">${[['active','출석 중'],['break','쉬는 중'],['left','떠남']].map(([v,t])=>`<option value="${v}" ${(m.status||'active')===v?'selected':''}>${t}</option>`).join('')}</select></div>
+      <div class="actions"><button class="btn sm" id="cSave">저장</button><span class="note" id="cMsg"></span></div></details></div>`;
+  $('#cClose').onclick=()=>{wOpen='';drawWCard()};
+  $('#cSave').onclick=async()=>{const phone=fmtPhone($('#cPhone').value);if(!phone){$('#cMsg').textContent='전화번호를 확인해 주세요';return}
+    const nc={phone,address:$('#cAddr').value.trim(),birth:c.birth||'',memo:$('#cMemo').value.trim()};
+    const {id:_,...mm}=m;
+    try{await store.setContact(id,nc);if((m.status||'active')!==$('#cStatus').value)await store.setMember(id,{...mm,status:$('#cStatus').value});cCache[id]=nc;toast('저장했어요');drawWCard()}catch(e){$('#cMsg').textContent=errMsg(e)}};
+}
+function drawWReg(){const el=$('#wRegBox');if(!el)return;if(!wReg){el.innerHTML='';return}
+  el.innerHTML=`<div class="panel"><h3 style="margin-top:0">새가족 등록</h3>
+    <div class="grid2"><div class="field"><label for="rName">이름 (필수)</label><input id="rName" autocomplete="off"></div>
+    <div class="field"><label for="rBirth">생년월일 (필수)</label><input type="date" id="rBirth" min="1950-01-01" max="${fmt(new Date())}"></div></div>
+    <div class="grid2"><div class="field"><label for="rPhone">전화번호 (필수)</label><input id="rPhone" inputmode="tel" placeholder="010-0000-0000"></div>
+    <div class="field"><label for="rFirst">처음 온 날</label><input type="date" id="rFirst" value="${date}"></div></div>
+    <div class="field"><label for="rAddr">주소</label><input id="rAddr"></div>
+    <div class="field"><label for="rMemo">메모 (선택)</label><textarea id="rMemo" rows="2" placeholder="인도자, 관심사 등"></textarea></div>
+    <label class="note"><input type="checkbox" id="rChk" checked> 오늘 출석도 함께 체크</label>
+    <div class="actions"><button class="btn" id="rSave">등록</button><button class="btn ghost" id="rCancel">취소</button><span class="note" id="rMsg"></span></div></div>`;
+  $('#rCancel').onclick=()=>{wReg=false;drawWReg()};
+  $('#rSave').onclick=async e=>{const name=$('#rName').value.trim(),birth=$('#rBirth').value,phone=fmtPhone($('#rPhone').value),msg=$('#rMsg');
+    if(!name)return msg.textContent='이름을 적어 주세요';if(!birth)return msg.textContent='생년월일을 넣어 주세요';if(!phone)return msg.textContent='전화번호를 확인해 주세요 (숫자 10~11자리)';
+    const id=memberIdFor(name,birth);
+    if(members.some(m=>m.id===id)){msg.textContent='이미 등록된 사람이에요. 이름으로 검색해 주세요';wq=name;drawWResults();return}
+    e.target.disabled=true;
+    const first=$('#rFirst').value||date;
+    try{await store.addMember(id,{name,birthYear:Number(birth.slice(0,4)),hint:'새가족',status:'active',registeredAt:fmt(new Date()),firstVisit:first,isNew:true},
+        {phone,address:$('#rAddr').value.trim(),birth,memo:$('#rMemo').value.trim()});
+      if($('#rChk').checked)await store.checkIn(date,id,name);
+      toast(`${name} 님을 등록했어요`);wReg=false;wq='';renderWelcome()}
+    catch(err){msg.textContent=err?.code==='already-exists'?'이미 등록된 사람이에요':errMsg(err);e.target.disabled=false}};
+}
+
 /* ---------- 화면 전환 ---------- */
-const typing=()=>{const f=document.activeElement;return f&&f.closest&&f.closest('#v-check')&&f.matches('input,textarea')};
+const typing=(sel='#v-check')=>{const f=document.activeElement;return f&&f.closest&&f.closest(sel)&&f.matches('input,textarea,select')};
 function render(){
   const out=!role;
   $('.date').hidden=out;$('.tabs').hidden=out;$('#v-login').hidden=!out;
-  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';
+  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';$('#v-welcome').hidden=out||view!=='welcome';
+  $('#tabWelcome').hidden=role!=='nf';
   if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));return}
   document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  if(view==='dashboard')renderDash();else if(!typing())renderCheck();
+  if(view==='dashboard')renderDash();else if(view==='welcome')renderWelcome();else if(!typing())renderCheck();
   sheetBtn();
 }
 /* 구글 시트 버튼: 새가족팀만 보여요. 다른 권한은 버튼도, 링크 주소도 없어요 */
 function sheetBtn(){const a=$('#sheetLink');const ok=!!SHEET_URL&&role==='nf';a.hidden=!ok;
   if(ok)a.href=SHEET_URL;else a.removeAttribute('href')}
-const route=()=>{view=location.hash==='#check'?'check':'dashboard';render()};
+const route=()=>{view={'#check':'check','#welcome':'welcome'}[location.hash]||'dashboard';render()};
 addEventListener('hashchange',route);
 
 /* ---------- 데이터 연결 ---------- */
 const netWarn=t=>{const w=$('#warn');if(DEMO)return;if(t){w.hidden=false;w.textContent=t}else if(w.dataset.net){w.hidden=true}w.dataset.net=t?'1':''};
-function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>netWarn('연결이 끊겼어요. 새로고침해 주세요.'))}
+function subWelcome(){unW&&unW();unW=null;welcome=null;if(!role)return;unW=store.onWelcome(date,w=>{welcome=w;render()},()=>{})}
+function subAtt(){subWelcome();unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>netWarn('연결이 끊겼어요. 새로고침해 주세요.'))}
 let timer=null;
 function subAll(){
   unG&&unG();unG=null;groups=[];loaded=false;clearTimeout(timer);
