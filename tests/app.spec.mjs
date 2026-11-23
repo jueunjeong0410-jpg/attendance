@@ -216,34 +216,43 @@ test('새가족팀은 목장 출석 체크·명단 수정을 못 한다', async 
 });
 
 test('연도가 바뀌면 목장을 새로 만들고, 지난 연도 목장·기록은 그대로 남는다', async ({ page }) => {
-  await setupGroups(page);                                   // 올해(2026) 목장 13개
-  await fillRoster(page, ['가목자', '나하늘']);
-  await page.click('.m[data-n="나하늘"]');
-  await page.click('#submit');
-  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
-  const sunday = await page.inputValue('#date');
-
-  // 2027년 주일로 가면 2026년 목장은 안 보이고 새로 만들 수 있다
-  await page.fill('#date', '2027-01-03');
-  await expect(page.locator('#make13')).toBeVisible();
+  // 2026년 목장·기록이 있는 상태에서, 시계를 2027년 1월로 돌려요
+  await page.clock.install({ time: new Date('2027-01-05T03:00:00Z') });
+  await page.goto('/');
+  const g26 = { id: 'g01', name: '테스트 목장', order: 1, leader: '가목자', members: [{ name: '가목자', isNew: false }, { name: '나하늘', isNew: false }] };
+  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { groups: { g01: g26 },
+    att: { '2026-11-22_g01': { date: '2026-11-22', gid: 'g01', groupName: '테스트 목장', present: ['나하늘'], worship: [], absent: ['가목자'], guests: [] } } });
+  await page.reload();
+  await login(page, EDIT_PW);
+  await page.goto('/#check');
+  await expect(page.locator('#date')).toHaveValue('2027-01-03');
+  await expect(page.locator('#make13')).toBeVisible();                      // 2027년 목장은 아직 없음
   await page.click('#make13');
   await expect(page.locator('.gp')).toHaveCount(13);
   await page.click('#edit');
-  await page.fill('#en', '테스트 목장');                     // 2027년 목장 이름을 같은 이름으로 바꿔도
+  await page.fill('#en', '테스트 목장');                                     // 같은 이름으로 바꿔도
   await page.fill('#em', '새목원');
   await page.click('#eSave');
-
   // 2026년으로 돌아가면 예전 명단·기록이 그대로
-  await page.fill('#date', sunday);
+  await page.fill('#date', '2026-11-22');
   await page.goto('/#dashboard');
-  await expect(page.locator('#rows .row')).toHaveCount(13);
+  await expect(page.locator('#rows .row')).toHaveCount(1);
   await page.click('[data-open]');
   await expect(page.locator('.detail')).toContainText('나하늘');
   await expect(page.locator('.detail')).not.toContainText('새목원');
   const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
-  const ids = Object.keys(demo.groups);
-  expect(ids.filter(i => i.startsWith('2027_')).length).toBe(13);  // 새해 목장은 따로 저장
-  expect(ids.filter(i => /^g\d+$/.test(i) || i.startsWith('2026_')).length).toBe(13);
+  expect(Object.keys(demo.groups).filter(i => i.startsWith('2027_')).length).toBe(13);
+  expect(demo.groups.g01).toEqual(g26);                                     // 2026 목장은 그대로
+  // 새해 1월 한 달 동안은 작년 기록을 마저 고칠 수 있고, 2월부터는 잠겨요
+  await page.goto('/#check');
+  await expect(page.locator('#submit')).toBeVisible();
+  await page.clock.setFixedTime(new Date('2027-02-01T03:00:00Z'));
+  await page.reload();
+  await login(page, EDIT_PW);
+  await page.fill('#date', '2026-11-22');
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('지난 연도');
+  await expect(page.locator('#submit')).toHaveCount(0);
 });
 
 test('지난 연도는 출석·명단을 고칠 수 없다 (보기만)', async ({ page }) => {
@@ -496,34 +505,60 @@ test('대시보드 큰 숫자는 공식 출석(목자 체크 + 새가족팀 체�
   await expect(page.locator('#tRate')).toContainText('목자 체크 3 · 새가족팀 체크 4');
 });
 
-/* ---------- 분기 보고 ---------- */
-test('보고 탭: 이번 분기 요약 4개·주별 추이·목장별 출석률·4주 연속 결석, 이전 분기로 이동', async ({ page }) => {
+/* ---------- 보고 탭 없음 · 미래 날짜 막기 ---------- */
+test('웹앱에는 보고 탭이 없다 (분기 통계는 구글 시트에서)', async ({ page }) => {
   await page.goto('/');
-  const groups = { '2026_g01': { id: '2026_g01', year: 2026, name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }] },
-    '2026_g02': { id: '2026_g02', year: 2026, name: '라목장', order: 2, members: [{ name: '라은혜' }, { name: '마다온' }] } };
-  const r = (d, gid, present, absent, guests = []) => ({ date: d, gid, present, worship: [], absent, guests });
-  const ds = ['2026-10-04', '2026-10-11', '2026-10-18', '2026-10-25'];
-  const att = {};
-  ds.forEach((d) => { att[d + '_2026_g01'] = r(d, '2026_g01', ['가목자', '나하늘'], []); att[d + '_2026_g02'] = r(d, '2026_g02', ['라은혜'], ['마다온'], d === ds[0] ? ['손님'] : []); });
-  att['2026-09-27_2026_g01'] = r('2026-09-27', '2026_g01', ['가목자'], ['나하늘']);
-  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { groups, att });
-  await page.reload();
-  await login(page, VIEW_PW);
-  await page.click('a[data-v="report"]');
-  await expect(page.locator('#qLabel')).toHaveText('2026년 4분기');
-  const cards = page.locator('.rcard');
-  await expect(cards.nth(0)).toContainText('평균 예배 출석3명');
-  await expect(cards.nth(0)).toContainText('▲ 2명');                     // 3분기 평균 1명 → 3명
-  await expect(cards.nth(3)).toContainText('방문자1명');
-  await expect(page.locator('.rchart circle')).toHaveCount(4);
-  await expect(page.locator('.rb').first()).toContainText('가목장');
-  await expect(page.locator('.rb').first()).toContainText('100%');
-  await expect(page.locator('.rb').nth(1).locator('i.low')).toHaveCount(1);  // 라목장 50% → 빨간색
-  await expect(page.locator('.absent4 summary')).toContainText('1명');     // 마다온
-  await expect(page.locator('#reportBody a[href*="docs.google.com"]')).toHaveCount(0);   // 보기 권한엔 시트 링크 없음
-  await page.click('#qPrev');
-  await expect(page.locator('#qLabel')).toHaveText('2026년 3분기');
-  await expect(page.locator('.rchart circle')).toHaveCount(1);
+  await login(page, NF_PW);
+  await expect(page.locator('.tabs a')).toHaveText(['대시보드', '출석체크', '새가족']);
+  await expect(page.locator('#v-report')).toHaveCount(0);
+});
+
+test('미래 날짜는 고를 수 없다: 달력 최대값은 오늘, ▶는 흐리게 막히고, 직접 넣어도 오늘로 돌아온다', async ({ page }) => {
+  await page.goto('/');
+  await login(page, EDIT_PW);
+  const today = await page.evaluate(() => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10));
+  await expect(page.locator('#date')).toHaveAttribute('max', today);
+  await expect(page.locator('#next')).toBeDisabled();                       // 이번 주일에서 다음 주일은 미래
+  expect(await page.locator('#next').evaluate(e => getComputedStyle(e).opacity)).toBe('0.3');   // 옅게
+  await page.click('#prev');
+  await expect(page.locator('#next')).toBeEnabled();                        // 지난주에선 다음 주로 갈 수 있음
+  await page.fill('#date', '2099-01-04');
+  await expect(page.locator('#toast')).toContainText('미래 날짜');
+  await expect(page.locator('#date')).toHaveValue(today);
+});
+
+test('새가족 등록: 등록한 날을 따로 넣을 수 있고(기본 오늘), 미래·처음 온 날보다 앞은 안 된다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  const today = await page.evaluate(() => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10));
+  await page.click('#wRegBtn');
+  await expect(page.locator('#rReg')).toHaveValue(today);
+  await expect(page.locator('#rReg')).toHaveAttribute('max', today);
+  await expect(page.locator('#rFirst')).toHaveAttribute('max', today);
+  await page.fill('#rName', '나등록');
+  await page.fill('#rBirth', '2004-02-03');
+  await page.fill('#rPhone', '010-1111-2222');
+  await page.fill('#rFirst', '2026-11-15');
+  await page.fill('#rReg', '2026-11-08');
+  await page.click('#rSave');
+  await expect(page.locator('#rMsg')).toContainText('처음 온 날과 같거나 그 뒤');
+  await page.fill('#rReg', '2026-11-16');
+  await page.click('#rSave');
+  await expect(page.locator('#wRegBox .panel')).toHaveCount(0);
+  const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  expect(demo.members['m_20040203_나등록']).toMatchObject({ firstVisit: '2026-11-15', registeredAt: '2026-11-16', isNew: true });
+});
+
+test('새가족 등록·출석 체크도 구글 시트에 업데이트 신호를 보낸다', async ({ page, request }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await request.get('/__reset');
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  await page.fill('#ws', '가하늘');
+  await page.click('#wRes [data-chk="m_19960215_가하늘"]');
+  await page.waitForTimeout(3600);
+  expect(Number(await (await request.get('/__pings')).text())).toBeGreaterThanOrEqual(1);
 });
 
 /* ---------- 보안 ---------- */
@@ -533,7 +568,7 @@ test('보안 정책(CSP)이 있고, 앱의 모든 화면이 정책 위반 없이
   await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
   expect(await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content')).toContain("object-src 'none'");
   await login(page, NF_PW);
-  for (const h of ['#dashboard', '#welcome', '#report', '#check']) { await page.goto('/' + h); await page.waitForTimeout(150); }
+  for (const h of ['#dashboard', '#welcome', '#check']) { await page.goto('/' + h); await page.waitForTimeout(150); }
   await page.fill('#date', await page.inputValue('#date'));
   violations.push(...((await page.evaluate(() => window.__csp)) || []).filter(v => !v.includes('fonts.g')));   // 테스트 환경은 글꼴 서버 접속이 막혀 있어 제외
   expect(violations).toEqual([]);
