@@ -92,6 +92,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 알림 설정 (회계팀 푸시 채널 이름). 새가족팀만 읽고, 쓰기는 시트 스크립트(관리자)만
+    match /config/notify {
+      allow read: if isNF();
+      allow write: if false;
+    }
+
     // 새가족팀 출석 (주일마다 문서 하나, 이름은 날짜)
     match /welcome/{date} {
       allow read: if signedIn();

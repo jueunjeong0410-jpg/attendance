@@ -624,3 +624,39 @@ test('동명이인 표시: 이름 뒤에 생년 두 자리 (새가족 검색·�
   await page.fill('#em', '다은혜01');
   await expect(page.locator('.lk.ok')).toContainText('다은혜01');
 });
+
+/* ---------- 새가족 등록 → 회계팀 푸시 (새가족팀 휴대폰에서 바로) ---------- */
+test('새가족 등록하면 회계팀 채널로 푸시(문구 그대로), 채널 설정이 없으면 안 보내고, 실패하면 안내', async ({ page, request }) => {
+  await request.get('/__reset');
+  await seed(page, { members: FAKE_MEMBERS, config: { notify: { newcomerTopic: 'fake-acct-topic' } } });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  const reg = async (name, birth) => {
+    await page.click('#wRegBtn');
+    await page.fill('#rName', name); await page.fill('#rBirth', birth); await page.fill('#rPhone', '010-1234-0000');
+    await page.click('#rSave');
+  };
+  await reg('신소망', '2003-04-05');
+  await expect(page.locator('#toast')).toContainText('회계팀에 알렸어요');
+  let pushes = await (await request.get('/__pushes')).json();
+  expect(pushes.length).toBe(1);
+  expect(pushes[0].topic).toBe('fake-acct-topic');
+  expect(pushes[0].message).toMatch(/^기쁜 소식! 새가족이 등록했습니다. 헌금봉투를 새로 만들어주세요!/);
+  expect(pushes[0].message).toContain('이름: 신소망');
+  expect(pushes[0].message).not.toMatch(/010-/);                                   // 전화번호는 안 보냄
+  await reg('다은혜', '2007-07-07');                                                // 동명이인이면 생년 두 자리
+  await expect(page.locator('#toast')).toContainText('다은혜07');
+  pushes = await (await request.get('/__pushes')).json();
+  expect(pushes[1].message).toContain('이름: 다은혜07');
+  await request.get('/__pushfail');                                                 // 푸시 서버 실패
+  await reg('나실패', '2001-01-01');
+  await expect(page.locator('#toast')).toContainText('회계팀 알림은 못 보냈어요', { timeout: 15000 });
+  await request.get('/__pushfail');
+});
+
+test('새가족 알림 채널 설정은 새가족팀만 읽을 수 있다', async ({ page }) => {
+  await seed(page, { config: { notify: { newcomerTopic: 'fake-acct-topic' } } });
+  await login(page, EDIT_PW);
+  const r = await page.evaluate(async () => { try { await window.__store.getNotify(); return 'read'; } catch (e) { return e.code; } });
+  expect(r).toBe('permission-denied');
+});
