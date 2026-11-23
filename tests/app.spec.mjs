@@ -495,3 +495,33 @@ test('대시보드 큰 숫자는 공식 출석(목자 체크 + 새가족팀 체�
   await expect(page.locator('#tTotal')).toContainText('6');
   await expect(page.locator('#tRate')).toContainText('목자 체크 3 · 새가족팀 체크 4');
 });
+
+/* ---------- 분기 보고 ---------- */
+test('보고 탭: 이번 분기 요약 4개·주별 추이·목장별 출석률·4주 연속 결석, 이전 분기로 이동', async ({ page }) => {
+  await page.goto('/');
+  const groups = { '2026_g01': { id: '2026_g01', year: 2026, name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }] },
+    '2026_g02': { id: '2026_g02', year: 2026, name: '라목장', order: 2, members: [{ name: '라은혜' }, { name: '마다온' }] } };
+  const r = (d, gid, present, absent, guests = []) => ({ date: d, gid, present, worship: [], absent, guests });
+  const ds = ['2026-10-04', '2026-10-11', '2026-10-18', '2026-10-25'];
+  const att = {};
+  ds.forEach((d) => { att[d + '_2026_g01'] = r(d, '2026_g01', ['가목자', '나하늘'], []); att[d + '_2026_g02'] = r(d, '2026_g02', ['라은혜'], ['마다온'], d === ds[0] ? ['손님'] : []); });
+  att['2026-09-27_2026_g01'] = r('2026-09-27', '2026_g01', ['가목자'], ['나하늘']);
+  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { groups, att });
+  await page.reload();
+  await login(page, VIEW_PW);
+  await page.click('a[data-v="report"]');
+  await expect(page.locator('#qLabel')).toHaveText('2026년 4분기');
+  const cards = page.locator('.rcard');
+  await expect(cards.nth(0)).toContainText('평균 예배 출석3명');
+  await expect(cards.nth(0)).toContainText('▲ 2명');                     // 3분기 평균 1명 → 3명
+  await expect(cards.nth(3)).toContainText('방문자1명');
+  await expect(page.locator('.rchart circle')).toHaveCount(4);
+  await expect(page.locator('.rb').first()).toContainText('가목장');
+  await expect(page.locator('.rb').first()).toContainText('100%');
+  await expect(page.locator('.rb').nth(1).locator('i.low')).toHaveCount(1);  // 라목장 50% → 빨간색
+  await expect(page.locator('.absent4 summary')).toContainText('1명');     // 마다온
+  await expect(page.locator('#reportBody a[href*="docs.google.com"]')).toHaveCount(0);   // 보기 권한엔 시트 링크 없음
+  await page.click('#qPrev');
+  await expect(page.locator('#qLabel')).toHaveText('2026년 3분기');
+  await expect(page.locator('.rchart circle')).toHaveCount(1);
+});
