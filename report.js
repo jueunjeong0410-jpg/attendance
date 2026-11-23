@@ -9,12 +9,24 @@
 var LEGACY_GROUP_YEAR = 2026;
 function rptGroupYear(g) { return Number(g.year) || LEGACY_GROUP_YEAR; }
 
-// 이름 → 교인 id: 교인 명단에 그 이름이 딱 한 명일 때만 (동명이인은 목자가 명단 수정에서 골라야 해요)
+// 동명이인: 교인 명단(떠난 사람 제외)에 같은 이름이 둘 이상인 이름들
+function dupNameSet(members) {
+  var cnt = {}, out = {};
+  (members || []).forEach(function (m) { if ((m.status || 'active') === 'left') return; cnt[m.name] = (cnt[m.name] || 0) + 1; });
+  Object.keys(cnt).forEach(function (n) { if (cnt[n] > 1) out[n] = true; });
+  return out;
+}
+// 보여 줄 이름: 동명이인이면 이름 뒤에 출생연도 두 자리 (예: 김가은05)
+function nameLabel(m, dups) { return dups && dups[m.name] && m.birthYear ? m.name + String(m.birthYear).slice(2) : m.name; }
+// 이름 → 교인 id: 교인 명단에 그 이름이 딱 한 명일 때만. 동명이인은 '김가은05'처럼 생년을 붙인 이름으로만 찾아요
 function uniqueNames(members) {
-  var cnt = {}, id = {};
-  (members || []).forEach(function (m) { if ((m.status || 'active') === 'left') return; cnt[m.name] = (cnt[m.name] || 0) + 1; id[m.name] = m.id; });
+  var dups = dupNameSet(members), cnt = {}, id = {};
+  (members || []).forEach(function (m) {
+    if ((m.status || 'active') === 'left') return;
+    var k = nameLabel(m, dups); cnt[k] = (cnt[k] || 0) + 1; id[k] = m.id;
+  });
   var out = {};
-  Object.keys(cnt).forEach(function (n) { if (cnt[n] === 1) out[n] = id[n]; });
+  Object.keys(cnt).forEach(function (n) { if (cnt[n] === 1 && !dups[n]) out[n] = id[n]; });
   return out;
 }
 // 목장 명단의 사람 → 교인 id (목자가 연결한 id가 먼저, 없으면 하나뿐인 이름으로)
@@ -140,4 +152,4 @@ function quartersWithData(records, welcomes) {
   return Object.keys(qs).sort();
 }
 
-if (typeof module !== 'undefined') module.exports = { uniqueNames: uniqueNames, reconcile: reconcile, quarterStats: quarterStats, quarterOf: quarterOf, quarterRange: quarterRange, prevQuarter: prevQuarter, quartersWithData: quartersWithData, quarterLabel: quarterLabel };
+if (typeof module !== 'undefined') module.exports = { dupNameSet: dupNameSet, nameLabel: nameLabel, uniqueNames: uniqueNames, reconcile: reconcile, quarterStats: quarterStats, quarterOf: quarterOf, quarterRange: quarterRange, prevQuarter: prevQuarter, quartersWithData: quartersWithData, quarterLabel: quarterLabel };

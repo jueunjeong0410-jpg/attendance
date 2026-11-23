@@ -279,7 +279,10 @@ const parseMembers=t=>t.split(/\n/).map(s=>s.trim()).filter(Boolean).map(s=>({na
 const memberText=ms=>(ms||[]).map(m=>m.name+(m.isNew?'*':'')).join('\n');
 /* 목장 명단의 이름 ↔ 교인 명단 연결. 같은 이름이 여럿(동명이인)이면 목자가 골라요 */
 const active=()=>members.filter(m=>(m.status||'active')!=='left');
-const candidates=name=>active().filter(m=>m.name===name);
+const dups=()=>dupNameSet(members);
+const L=m=>nameLabel(m,dups());   // 동명이인은 '김가은05'처럼 생년 두 자리를 붙여 보여요
+const candidates=name=>{const c=active().filter(m=>m.name===name);if(c.length)return c;
+  const x=name.match(/^(.+?)(\d{2})$/);return x?active().filter(m=>m.name===x[1]&&String(m.birthYear||'').slice(2)===x[2]):[]};
 const mLabel=m=>[m.birthYear?String(m.birthYear).slice(2)+'년생':'',m.hint||''].filter(Boolean).join(' · ');
 let linkSel={};   // 명단 수정 중 고른 연결: 이름 → 교인 id ('' = 모름)
 const resolveMid=(name,prev)=>{if(name in linkSel)return linkSel[name]||undefined;const c=candidates(name);
@@ -368,13 +371,14 @@ function renderCheck(){
     const prevMid=Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]));
     const drawLinks=()=>{const list=parseMembers($('#em').value);if(!members.length){$('#links').innerHTML='';return}
       $('#links').innerHTML=`<p class="note" style="margin:0 0 6px">교인 명단과 연결 · 새가족팀 출석과 맞춰 보는 데 써요</p>`+list.map(m=>{const c=candidates(m.name),mid=resolveMid(m.name,prevMid[m.name]);
-        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(m.name)} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
+        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(L(x))} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
         if(c.length===1)return `<div class="lk ok">✓ ${esc(m.name)} <span class="note">${esc(mLabel(c[0]))}</span></div>`;
         return `<div class="lk no">○ ${esc(m.name)} <span class="note">교인 명단에 없어요 · 새가족팀에 등록을 부탁해 주세요</span></div>`}).join('');
       $('#links').querySelectorAll('[data-lk]').forEach(sel=>sel.onchange=()=>{linkSel[sel.dataset.lk]=sel.value})};
     $('#em').addEventListener('input',drawLinks);drawLinks();
     $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
-      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);return mid?{...m,mid}:m});
+      // 연결된 동명이인은 명단 이름도 '김가은05'처럼 바꿔 저장해요(출석 기록·시트에도 그대로 남게)
+      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);if(!mid)return m;const x=members.find(y=>y.id===mid);return {...m,name:x?L(x):m.name,mid}});
       try{await store.setGroup(g.id,{...g,year:gYear(g),name,leader:$('#el').value.trim(),members:roster,order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
     $('#eCancel').onclick=()=>{editing=false;renderCheck()};
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
@@ -467,11 +471,11 @@ function renderWelcome(){
   if(open)$('#wRegBtn').onclick=()=>{wReg=!wReg;drawWReg()};
   drawWReg();drawWResults();drawWChecked();drawWCard();drawRecon();
 }
-const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(m.name)}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
+const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(L(m))}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
   ${yearOpen(curYear())&&recOpen(date)?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
 function bindW(el){
   el.querySelectorAll('[data-chk]').forEach(b=>b.onclick=async()=>{const id=b.dataset.chk,m=members.find(x=>x.id===id),on=!!checked()[id];b.disabled=true;
-    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?.name||'');toast(on?`${m?.name} 출석 취소`:`${m?.name} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
+    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?L(m):'');toast(on?`${m?L(m):''} 출석 취소`:`${m?L(m):''} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
   el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{wOpen=wOpen===b.dataset.card?'':b.dataset.card;drawWCard()});
 }
 function drawWResults(){const el=$('#wRes');if(!el)return;const q=wq.trim();
@@ -489,7 +493,7 @@ async function drawWCard(){const el=$('#wCard');if(!el)return;const id=wOpen;if(
   if(wOpen!==id)return;
   const tel=String(c.phone||'').replace(/[^0-9+]/g,'');
   el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처">
-    <div class="ghead"><h3 style="margin:0">${esc(m.name)} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
+    <div class="ghead"><h3 style="margin:0">${esc(L(m))} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
     <dl class="kv"><dt>전화</dt><dd>${c.phone?`<a href="tel:${esc(tel)}" class="tel">${esc(c.phone)}</a>`:'<span class="note">없음</span>'}</dd>
     <dt>주소</dt><dd>${esc(c.address||'')||'<span class="note">없음</span>'}</dd>
     <dt>생일</dt><dd>${esc(c.birth||'')||'<span class="note">없음</span>'}</dd>

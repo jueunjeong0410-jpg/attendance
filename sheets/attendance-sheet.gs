@@ -507,12 +507,12 @@ function buildNewcomerRows(members, contacts, records, welcomes) {
   records.forEach(function (r) {
     [].concat(r.present || [], r.worship || []).forEach(function (n) { var id = (r.ids || {})[n]; if (id) mark(id, r.date); });
   });
-  var st = { active: '출석 중', 'break': '쉬는 중', left: '떠남' };
+  var st = { active: '출석 중', 'break': '쉬는 중', left: '떠남' }, dups = dupNameSet(members);
   return members.filter(function (m) { return m.isNew; })
     .sort(function (a, b) { return String(b.registeredAt || '').localeCompare(String(a.registeredAt || '')) || String(a.name).localeCompare(String(b.name)); })
     .map(function (m) {
       var c = contacts[m.id] || {};
-      return [m.registeredAt || '', m.firstVisit || '', m.name, c.birth || '', c.phone || '', c.address || '', c.memo || '',
+      return [m.registeredAt || '', m.firstVisit || '', nameLabel(m, dups), c.birth || '', c.phone || '', c.address || '', c.memo || '',
         st[m.status || 'active'] || '', Object.keys(came[m.id] || {}).length];
     });
 }
@@ -564,10 +564,11 @@ function sendAlert_(emails, topic, title, body) {
 function newcomersToNotify(members, notified) {
   return members.filter(function (m) { return m.isNew && !notified[m.id]; });
 }
-function newcomerMessage(m) {
+function newcomerMessage(m, label) {
+  label = label || m.name;
   return {
-    title: '[청년부] 새가족 ' + m.name + '님 헌금봉투를 준비해 주세요',
-    body: '새가족이 등록됐어요. 헌금봉투를 만들어 주세요.\n\n이름: ' + m.name +
+    title: '[청년부] 새가족 ' + label + '님 헌금봉투를 준비해 주세요',
+    body: '새가족이 등록됐어요. 헌금봉투를 만들어 주세요.\n\n이름: ' + label +
       (m.birthYear ? '\n출생연도: ' + m.birthYear : '') + '\n처음 온 날: ' + (m.firstVisit || '') + '\n등록한 날: ' + (m.registeredAt || '')
   };
 }
@@ -582,7 +583,7 @@ function notifyNewcomers_(p, members) {
   var sent = 0, failed = {};
   if (raw !== null && (emails.length || topic)) {
     todo.forEach(function (m) {
-      var msg = newcomerMessage(m), r = sendAlert_(emails, topic, msg.title, msg.body);
+      var msg = newcomerMessage(m, nameLabel(m, dupNameSet(members))), r = sendAlert_(emails, topic, msg.title, msg.body);
       if (r.failed) failed[m.id] = true; else sent++;
     });
   }
@@ -687,13 +688,15 @@ function importCheckbus() {
   members.forEach(function (m) { have[m.id] = true; });
   Object.keys(idByNo).forEach(function (no) { if (!have[idByNo[no]]) delete idByNo[no]; });
   var res = checkbusToWelcome(rows, rows[0][0], idByNo, uniqueNames(members));
+  var dups = dupNameSet(members), labelById = {};
+  members.forEach(function (m) { labelById[m.id] = nameLabel(m, dups); });   // 동명이인은 '김가은05'로 저장
   var existing = {};
   listDocs_(p, auth, 'welcome').forEach(function (w) { existing[w.id] = w; });
   var base = 'projects/' + p.FIREBASE_PROJECT_ID + '/databases/(default)/documents/', writes = [], total = 0, now = new Date().toISOString();
   Object.keys(res.byDate).forEach(function (d) {
     var ids = Object.keys(res.byDate[d]); if (!ids.length) return;
     var checked = (existing[d] && existing[d].checked) || {}, added = 0;
-    ids.forEach(function (id) { if (!checked[id]) { checked[id] = { name: res.byDate[d][id], at: '출결버스' }; added++; } });
+    ids.forEach(function (id) { if (!checked[id]) { checked[id] = { name: labelById[id] || res.byDate[d][id], at: '출결버스' }; added++; } });
     total += added;
     var cf = {};
     Object.keys(checked).forEach(function (id) { cf[id] = { mapValue: { fields: toFields_({ name: checked[id].name || '', at: checked[id].at || '' }) } }; });

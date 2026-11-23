@@ -303,6 +303,7 @@ test('출결버스 가져오기: 새가족팀 출석에 더하고(기존 체크 
   expect(w.map(x => x.update.name.split('/').pop()).sort()).toEqual(['2026-11-01', '2026-11-08', '2026-11-15', '2026-11-22']);
   const d22 = w.find(x => x.update.name.endsWith('2026-11-22')).update.fields.checked.mapValue.fields;
   expect(Object.keys(d22).sort()).toEqual(['m_20050327_다은혜', 'm_새가족']);              // 기존 체크 유지
+  expect(d22.m_20050327_다은혜.mapValue.fields.name).toEqual({ stringValue: '다은혜' });     // (테스트 명단엔 출생연도가 없어 그대로)
   expect(ss.getSheetByName('분기별통계')).not.toBeNull();                                    // 가져온 뒤 시트 업데이트
 });
 
@@ -311,4 +312,15 @@ test('출결버스 가져오기: 스크립트 주인의 구글 로그인이 아�
   const c = makeAppsScriptGlobals({ ss, oauth: false });
   vm.createContext(c); vm.runInContext(code, c);
   expect(() => c.importCheckbus()).toThrow(/구글 로그인으로만/);
+});
+
+test('동명이인 표시: 시트 새가족 탭·알림에 생년 두 자리 (예: 김가은05)', () => {
+  const ms = [{ id: 'm_a', name: '김가은', birthYear: 2001, isNew: true, registeredAt: '2026-11-20' },
+    { id: 'm_b', name: '김가은', birthYear: 2005, isNew: true, registeredAt: '2026-11-21' }];
+  const props = { NOTIFIED_IDS: 'm_a', NEWCOMER_PUSH: 'fake-topic' };
+  const ss = makeSpreadsheet();
+  const c = runNC(ss, { members: ms, props });
+  const sh = ss.getSheetByName('새가족');
+  expect([sh.value(3, 3), sh.value(4, 3)]).toEqual(['김가은05', '김가은01']);
+  expect(c.pushes.map(p => p.title)).toEqual(['[청년부] 새가족 김가은05님 헌금봉투를 준비해 주세요']);
 });

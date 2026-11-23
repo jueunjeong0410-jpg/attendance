@@ -71,3 +71,10 @@ test('이름 맞추기: 교인 명단에 한 명뿐인 이름은 목장 명단�
   expect(r.unlinked.map(x => x.name)).toEqual(['나']);                       // 동명이인은 목자가 골라야
   expect(R.reconcile(gs, { g1: { present: ['가'], worship: [], absent: [] } }, { a: { name: '가' } }).both.length).toBe(0);  // 명단 안 주면 예전처럼
 });
+
+test('동명이인 이름표: 생년 두 자리를 붙이고, 그 이름으로 찾을 수 있다', () => {
+  const ms = [{ id: 'a', name: '김가은', birthYear: 2001 }, { id: 'b', name: '김가은', birthYear: 2005 }, { id: 'c', name: '나하늘', birthYear: 1999 }];
+  const d = R.dupNameSet(ms);
+  expect(ms.map(m => R.nameLabel(m, d))).toEqual(['김가은01', '김가은05', '나하늘']);
+  expect(R.uniqueNames(ms)).toEqual({ 김가은01: 'a', 김가은05: 'b', 나하늘: 'c' });
+});
