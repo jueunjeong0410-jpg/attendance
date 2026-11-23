@@ -310,3 +310,57 @@ test('화면 왼쪽 위 제목은 "강서성결교회 청년부 출석부"이고
   await expect(page.locator('body')).not.toContainText('Made by');
   await expect(page.locator('.top')).not.toContainText('연결됨');
 });
+
+/* ---------- 교인 명단 연결 ---------- */
+// 체험 모드 저장소에 가짜 교인 명단을 미리 넣어요
+async function seed(page, data) {
+  await page.goto('/');
+  await page.evaluate((d) => localStorage.setItem('demo', JSON.stringify(d)), data);
+  await page.reload();
+}
+const FAKE_MEMBERS = {
+  m_19960215_가하늘: { name: '가하늘', birthYear: 1996, hint: '가목장', status: 'active' },
+  m_20010628_다은혜: { name: '다은혜', birthYear: 2001, hint: '새가족팀', status: 'active' },
+  m_20050327_다은혜: { name: '다은혜', birthYear: 2005, hint: '라목장', status: 'active' },
+};
+
+test('명단 수정: 교인 명단과 연결되고, 동명이인은 목자가 골라서 저장·제출된다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, EDIT_PW);
+  await page.goto('/#check');
+  await page.click('#make13');
+  await page.click('#edit');
+  await page.fill('#em', '가하늘\n다은혜\n없는사람');
+  await expect(page.locator('.lk.ok')).toContainText('가하늘');
+  await expect(page.locator('.lk.warn')).toContainText('동명이인 2명');
+  await expect(page.locator('.lk.no')).toContainText('없는사람');
+  await page.selectOption('select[data-lk="다은혜"]', 'm_20050327_다은혜');
+  await page.click('#eSave');
+  await expect(page.locator('.m')).toHaveCount(3);
+  let demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const g = Object.values(demo.groups).find(x => x.order === 1);
+  expect(g.members).toEqual([
+    { name: '가하늘', isNew: false, mid: 'm_19960215_가하늘' },
+    { name: '다은혜', isNew: false, mid: 'm_20050327_다은혜' },
+    { name: '없는사람', isNew: false },
+  ]);
+  // 다시 열면 고른 사람이 그대로 선택돼 있다
+  await page.click('#edit');
+  await expect(page.locator('select[data-lk="다은혜"]')).toHaveValue('m_20050327_다은혜');
+  await page.click('#eCancel');
+  // 제출하면 이름 → 교인 id 가 함께 저장된다
+  await page.click('.m[data-n="가하늘"]');
+  await page.click('.m[data-n="다은혜"]');
+  await page.click('#submit');
+  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
+  demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const rec = Object.values(demo.att)[0];
+  expect(rec.ids).toEqual({ 가하늘: 'm_19960215_가하늘', 다은혜: 'm_20050327_다은혜' });
+});
+
+test('보기·목자 권한은 연락처(전화번호)를 읽을 수 없다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: { m_19960215_가하늘: { phone: '010-0000-0000' } } });
+  await login(page, EDIT_PW);
+  await expect(page.locator('#v-dashboard')).toBeVisible();
+  expect(await page.content()).not.toContain('010-0000-0000');
+});

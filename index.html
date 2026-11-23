@@ -98,6 +98,8 @@ textarea#memo{min-height:84px}
 .toast.on{opacity:1}
 .empty{padding:24px;text-align:center;color:var(--mute);border:2px dashed var(--line);border-radius:14px}
 [hidden]{display:none!important}
+.links{display:grid;gap:4px;margin:-4px 0 12px}.lk{font-size:14px;padding:6px 10px;border-radius:8px;background:var(--panel)}
+.lk.warn{background:light-dark(#fff4dd,#3a2f14)}.lk.no{color:var(--mute)}.lk select{padding:2px 4px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px}
 @media(max-width:600px){.tally{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -186,11 +188,22 @@ if(!DEMO){
     onAtt:(date,cb,err)=>F.onSnapshot(F.query(F.collection(fs,'attendance'),F.where('date','==',date)),s=>cb(s.docs.map(d=>d.data())),err),
     setGroup:(id,d)=>F.setDoc(F.doc(fs,'groups',id),d),
     delGroup:id=>F.deleteDoc(F.doc(fs,'groups',id)),
-    setAtt:(id,d)=>F.setDoc(F.doc(fs,'attendance',id),d)
+    setAtt:(id,d)=>F.setDoc(F.doc(fs,'attendance',id),d),
+    // 교인 명단(모두 읽기) · 연락처(새가족팀만) · 새가족팀 출석(주일마다 문서 하나)
+    onMembers:(cb,err)=>F.onSnapshot(F.collection(fs,'members'),s=>cb(s.docs.map(d=>({...d.data(),id:d.id}))),err),
+    getContact:async id=>{const d=await F.getDoc(F.doc(fs,'contacts',id));return d.exists()?d.data():null},
+    addMember:async(id,m,c)=>{const b=F.writeBatch(fs);b.set(F.doc(fs,'members',id),m);b.set(F.doc(fs,'contacts',id),c);await b.commit()},
+    setMember:(id,m)=>F.setDoc(F.doc(fs,'members',id),m),
+    setContact:(id,c)=>F.setDoc(F.doc(fs,'contacts',id),c),
+    onWelcome:(date,cb,err)=>F.onSnapshot(F.doc(fs,'welcome',date),d=>cb(d.exists()?d.data():null),err),
+    checkIn:(date,mid,name)=>F.setDoc(F.doc(fs,'welcome',date),{date,checked:{[mid]:{name,at:new Date().toISOString()}},updatedAt:new Date().toISOString()},{merge:true}),
+    checkOut:(date,mid)=>F.updateDoc(F.doc(fs,'welcome',date),new F.FieldPath('checked',mid),F.deleteField(),'updatedAt',new Date().toISOString()),
+    // 분기 보고: 기간 안의 기록 한 번에 읽기
+    rangeDocs:async(col,from,to)=>(await F.getDocs(F.query(F.collection(fs,col),F.where('date','>=',from),F.where('date','<=',to)))).docs.map(d=>d.data())
   };
 }else{
   const load=()=>{try{return JSON.parse(localStorage.getItem('demo'))||null}catch(e){return null}};
-  let D=load()||{groups:{},att:{}},role='';const subs=new Set();
+  let D=load()||{},role='';D={groups:{},att:{},members:{},contacts:{},welcome:{},...D};const subs=new Set();
   const emit=()=>{ls.set('demo',JSON.stringify(D));subs.forEach(f=>f())};
   const sub=f=>{subs.add(f);setTimeout(f,0);return()=>subs.delete(f)};
   let authCb=()=>{};
@@ -202,7 +215,16 @@ if(!DEMO){
     onAtt:(date,cb)=>sub(()=>cb(Object.values(D.att).filter(a=>a.date===date))),
     setGroup:async(id,d)=>{D.groups[id]={...d,id};emit()},
     delGroup:async id=>{delete D.groups[id];emit()},
-    setAtt:async(id,d)=>{D.att[id]=d;emit()}
+    setAtt:async(id,d)=>{D.att[id]=d;emit()},
+    onMembers:cb=>sub(()=>cb(Object.entries(D.members).map(([id,m])=>({...m,id})))),
+    getContact:async id=>{if(role!=='nf')throw{code:'permission-denied'};return D.contacts[id]||null},
+    addMember:async(id,m,c)=>{if(D.members[id])throw{code:'already-exists'};D.members[id]=m;D.contacts[id]=c;emit()},
+    setMember:async(id,m)=>{D.members[id]=m;emit()},
+    setContact:async(id,c)=>{D.contacts[id]=c;emit()},
+    onWelcome:(date,cb)=>sub(()=>cb(D.welcome[date]||null)),
+    checkIn:async(date,mid,name)=>{const w=D.welcome[date]||{date,checked:{}};w.checked[mid]={name,at:new Date().toISOString()};D.welcome[date]=w;emit()},
+    checkOut:async(date,mid)=>{if(D.welcome[date])delete D.welcome[date].checked[mid];emit()},
+    rangeDocs:async(col,from,to)=>Object.values(col==='welcome'?D.welcome:D.att).filter(x=>x.date>=from&&x.date<=to)
   };
   const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 목자 <b>1234</b>, 보기 <b>0000</b>, 새가족팀 <b>5678</b>';
 }
@@ -216,7 +238,7 @@ const pingSheet=()=>{if(!SHEET_SYNC_URL)return;clearTimeout(pingT);
 ['setGroup','delGroup','setAtt'].forEach(k=>{const f=store[k];store[k]=async(...a)=>{const r=await f(...a);pingSheet();return r}});
 
 /* ---------- 상태 ---------- */
-let groups=[],att={},loaded=false,role='',unG=null;
+let groups=[],att={},loaded=false,role='',unG=null,members=[],unM=null,welcome=null,unW=null;
 let view='dashboard',open=new Set(),gid=ls.get('gid')||'',draft=null,editing=false,unAtt=null;
 const pad=n=>String(n).padStart(2,'0');
 /* ---------- 연도: 해마다 목장·목원이 바뀌어요. 목장은 연도별로 따로 두고, 지난 연도 기록은 고칠 수 없어요 ---------- */
@@ -235,6 +257,13 @@ function setDate(d){date=d;$('#date').value=d;draft=null;subAtt();render()}
 
 const parseMembers=t=>t.split(/\n/).map(s=>s.trim()).filter(Boolean).map(s=>({name:s.replace(/\*$/,'').trim(),isNew:/\*$/.test(s)}));
 const memberText=ms=>(ms||[]).map(m=>m.name+(m.isNew?'*':'')).join('\n');
+/* 목장 명단의 이름 ↔ 교인 명단 연결. 같은 이름이 여럿(동명이인)이면 목자가 골라요 */
+const active=()=>members.filter(m=>(m.status||'active')!=='left');
+const candidates=name=>active().filter(m=>m.name===name);
+const mLabel=m=>[m.birthYear?String(m.birthYear).slice(2)+'년생':'',m.hint||''].filter(Boolean).join(' · ');
+let linkSel={};   // 명단 수정 중 고른 연결: 이름 → 교인 id ('' = 모름)
+const resolveMid=(name,prev)=>{if(name in linkSel)return linkSel[name]||undefined;const c=candidates(name);
+  if(prev&&c.some(m=>m.id===prev))return prev;return c.length===1?c[0].id:undefined};
 const sorted=()=>groups.filter(g=>gYear(g)===curYear()).sort((a,b)=>(a.order??99)-(b.order??99)||String(a.name).localeCompare(b.name,'ko',{numeric:true}));
 const errMsg=e=>e?.code==='permission-denied'?'권한이 없어요. 다시 로그인해 주세요':'저장 실패: 인터넷 연결을 확인해 주세요';
 
@@ -311,10 +340,20 @@ function renderCheck(){
       <div class="grid2"><div class="field"><label for="en">목장 이름</label><input type="text" id="en" value="${esc(g.name)}"></div>
       <div class="field"><label for="el">목자</label><input type="text" id="el" value="${esc(g.leader||'')}"></div></div>
       <div class="field"><label for="em">명단 · 한 줄에 한 명, 새가족은 이름 뒤에 *</label><textarea id="em" placeholder="김하늘&#10;이소망&#10;박은혜*">${esc(memberText(ms))}</textarea></div>
+      <div class="links" id="links" aria-live="polite"></div>
       <div class="field" style="max-width:160px"><label for="eo">표시 순서</label><input type="number" id="eo" value="${g.order??''}"></div>
       <div class="actions"><button class="btn" id="eSave">저장</button><button class="btn ghost" id="eCancel">취소</button><button class="btn ghost" id="eDel">목장 삭제</button></div></div>`+foot;
+    const prevMid=Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]));
+    const drawLinks=()=>{const list=parseMembers($('#em').value);if(!members.length){$('#links').innerHTML='';return}
+      $('#links').innerHTML=`<p class="note" style="margin:0 0 6px">교인 명단과 연결 · 새가족팀 출석과 맞춰 보는 데 써요</p>`+list.map(m=>{const c=candidates(m.name),mid=resolveMid(m.name,prevMid[m.name]);
+        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(m.name)} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
+        if(c.length===1)return `<div class="lk ok">✓ ${esc(m.name)} <span class="note">${esc(mLabel(c[0]))}</span></div>`;
+        return `<div class="lk no">○ ${esc(m.name)} <span class="note">교인 명단에 없어요 · 새가족팀에 등록을 부탁해 주세요</span></div>`}).join('');
+      $('#links').querySelectorAll('[data-lk]').forEach(sel=>sel.onchange=()=>{linkSel[sel.dataset.lk]=sel.value})};
+    $('#em').addEventListener('input',drawLinks);drawLinks();
     $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
-      try{await store.setGroup(g.id,{...g,year:gYear(g),name,leader:$('#el').value.trim(),members:parseMembers($('#em').value),order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
+      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);return mid?{...m,mid}:m});
+      try{await store.setGroup(g.id,{...g,year:gYear(g),name,leader:$('#el').value.trim(),members:roster,order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
     $('#eCancel').onclick=()=>{editing=false;renderCheck()};
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
       try{await store.delGroup(g.id);editing=false;gid='';toast('삭제했어요')}catch(e){toast(errMsg(e))}};
@@ -332,7 +371,7 @@ function renderCheck(){
     <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
     <div class="field"><label for="memo">메모 (선택) · 대시보드 맨 아래에 목장별로 모여요</label><textarea id="memo" rows="3" placeholder="기도제목, 결석 사유 등">${esc(draft.note)}</textarea></div>
     <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
-    $('#edit').onclick=()=>{editing=true;renderCheck()};
+    $('#edit').onclick=()=>{editing=true;linkSel={};renderCheck()};
     // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
     box.querySelectorAll('.m').forEach(b=>{const n=b.dataset.n;let t=null,longDone=false;
       const cancel=()=>{clearTimeout(t);t=null};
@@ -347,7 +386,8 @@ function renderCheck(){
       const is=v=>m=>S(m.name)===v;
       const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
         newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
-        note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString()};
+        note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString(),
+        ids:Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]))};   // 이름 → 교인 id (대조용)
       try{await store.setAtt(`${date}_${g.id}`,rec);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
       catch(err){toast(errMsg(err));e.target.disabled=false}};
   }
@@ -380,11 +420,13 @@ function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.o
 let timer=null;
 function subAll(){
   unG&&unG();unG=null;groups=[];loaded=false;clearTimeout(timer);
+  unM&&unM();unM=null;members=[];
   if(!role){subAtt();return}
   timer=setTimeout(()=>{if(!loaded)netWarn('데이터를 불러오지 못하고 있어요. 인터넷 연결을 확인해 주세요.')},10000);
   unG=store.onGroups((list,cache)=>{clearTimeout(timer);loaded=true;groups=list;if(!cache)netWarn('');render()},
     ()=>{clearTimeout(timer);loaded=true;netWarn('연결이 끊겼어요. 새로고침해 주세요.');render()});
   subAtt();
+  unM&&unM();unM=store.onMembers(list=>{members=list;render()},()=>{});
 }
 store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});
 $('#logoutD').onclick=()=>store.logout();
