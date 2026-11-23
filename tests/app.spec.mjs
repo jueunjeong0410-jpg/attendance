@@ -450,3 +450,48 @@ test('새가족팀: 지난 연도는 출석 체크·등록을 할 수 없다', a
   await page.fill('#ws', '가하늘');
   await expect(page.locator('#wRes [data-chk]')).toHaveCount(0);
 });
+
+/* ---------- 대조 ---------- */
+async function seedRecon(page) {
+  await page.goto('/');
+  const d = await page.inputValue('#date');
+  const M = { ...FAKE_MEMBERS,
+    m_19990101_나목원: { name: '나목원', birthYear: 1999, status: 'active' },
+    m_20000101_라목원: { name: '라목원', birthYear: 2000, status: 'active' },
+    m_20060101_신입: { name: '신입', birthYear: 2006, status: 'active', isNew: true } };
+  const groups = {
+    '2026_g01': { id: '2026_g01', year: 2026, name: '가목장', order: 1, members: [
+      { name: '가하늘', mid: 'm_19960215_가하늘' }, { name: '다은혜', mid: 'm_20050327_다은혜' },
+      { name: '나목원', mid: 'm_19990101_나목원' }, { name: '연결안됨' }] },
+    '2026_g02': { id: '2026_g02', year: 2026, name: '라목장', order: 2, members: [{ name: '라목원', mid: 'm_20000101_라목원' }] },
+  };
+  const att = { [`${d}_2026_g01`]: { date: d, gid: '2026_g01', groupName: '가목장', present: ['가하늘', '나목원'], worship: ['연결안됨'], absent: ['다은혜'],
+    ids: { 가하늘: 'm_19960215_가하늘', 나목원: 'm_19990101_나목원', 다은혜: 'm_20050327_다은혜' } } };
+  const ck = (name) => ({ name, at: '2026-01-01T00:00:00Z' });
+  const welcome = { [d]: { date: d, checked: { m_19960215_가하늘: ck('가하늘'), m_20050327_다은혜: ck('다은혜'), m_20060101_신입: ck('신입'), m_20000101_라목원: ck('라목원') } } };
+  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { members: M, groups, att, welcome });
+  await page.reload();
+}
+
+test('대조: 일치·목자 쪽 누락·새가족팀 쪽 누락·목장 없음·미제출·연결 안 됨을 나눠 보여 준다 (동명이인은 id로 구분)', async ({ page }) => {
+  await seedRecon(page);
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  const R = page.locator('#wRecon');
+  await expect(R.locator('.big')).toContainText('6');                        // 공식 출석: 한 곳이라도 체크
+  await expect(R).toContainText('양쪽 일치1명');
+  const sec = async (title) => (await R.locator(`h3:has-text("${title}") + p + .chips`).innerText()).replace(/\s+/g, ' ');
+  expect(await sec('목자 쪽 누락')).toContain('다은혜');                       // 새가족팀 O, 목자 X
+  expect(await sec('새가족팀 쪽 누락')).toContain('나목원');                   // 목자 O, 새가족팀 없음
+  expect(await sec('목장 미제출')).toContain('라목원');
+  expect(await sec('목장 없음')).toContain('신입');
+  expect(await sec('교인 명단과 연결 안 됨')).toContain('연결안됨');
+  await expect(R).toContainText('불일치 목장: 가목장 2명');
+});
+
+test('대시보드 큰 숫자는 공식 출석(목자 체크 + 새가족팀 체크, 한 곳이라도)이다', async ({ page }) => {
+  await seedRecon(page);
+  await login(page, VIEW_PW);
+  await expect(page.locator('#tTotal')).toContainText('6');
+  await expect(page.locator('#tRate')).toContainText('목자 체크 3 · 새가족팀 체크 4');
+});

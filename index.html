@@ -302,8 +302,10 @@ function renderDash(){
   const memos=gs.filter(g=>att[g.id]&&String(att[g.id].note||'').trim());
   $('#memos').innerHTML=memos.map(g=>`<div class="memo"><b>${esc(g.name)}</b><span class="note"> 목자 ${esc(g.leader||'-')}</span><p>${esc(att[g.id].note)}</p></div>`).join('')
     ||'<div class="empty">이번 주에 남긴 메모가 없어요.</div>';
-  $('#tTotal').innerHTML=`${P}<span> / ${T}명</span>`;
-  const r=T?Math.round(P/T*100):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`;$('#tMeter').style.width=r+'%';
+  // 큰 숫자 = 공식 출석: 목자 체크(O·△)와 새가족팀 체크 중 한 곳이라도 체크한 사람
+  const W=Object.keys(checked()).length,O=W?reconcile(gs,att,checked()).official:P;
+  $('#tTotal').innerHTML=`${O}<span> / ${T}명</span>`;
+  const r=T?Math.min(100,Math.round(O/T*100)):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`+(W?` · 목자 체크 ${P} · 새가족팀 체크 ${W}`:'');$('#tMeter').style.width=r+'%';
   $('#kSub').textContent=`${S} / ${gs.length}`;$('#kGroup').textContent=M+'명';$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
   document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const id=b.dataset.open;open.has(id)?open.delete(id):open.add(id);renderDash()});
 }
@@ -404,6 +406,44 @@ function renderCheck(){
   $('#logout').onclick=()=>store.logout();
 }
 
+/* ---------- 대조: 새가족팀 체크 ↔ 목자 체크 ----------
+   공식 출석 = 둘 중 한 곳이라도 체크한 사람(합집합). 사람 비교는 교인 id로 해요(동명이인 구분). */
+function reconcile(gs,attMap,checkedMap){
+  const where={};   // 교인 id → 올해 소속 목장
+  gs.forEach(g=>(g.members||[]).forEach(m=>{if(m.mid)where[m.mid]=g}));
+  const shep=new Map(),unlinked=[];   // 목자가 출석(O·△)으로 체크한 사람
+  gs.forEach(g=>{const r=attMap[g.id];if(!r)return;const roster=Object.fromEntries((g.members||[]).filter(m=>m.mid).map(m=>[m.name,m.mid]));
+    [...(r.present||[]),...(r.worship||[])].forEach(n=>{const mid=(r.ids||{})[n]||roster[n];if(mid)shep.set(mid,{name:n,g});else unlinked.push({name:n,g})})});
+  const out={both:[],shepMiss:[],nfMiss:[],noGroup:[],notSubmitted:[],unlinked};
+  Object.entries(checkedMap||{}).forEach(([mid,v])=>{
+    if(shep.has(mid))return out.both.push({mid,name:v.name,g:shep.get(mid).g});
+    const g=where[mid];
+    if(!g)return out.noGroup.push({mid,name:v.name});
+    if(!attMap[g.id])return out.notSubmitted.push({mid,name:v.name,g});
+    out.shepMiss.push({mid,name:v.name,g});
+  });
+  shep.forEach((v,mid)=>{if(!(checkedMap||{})[mid])out.nfMiss.push({mid,name:v.name,g:v.g})});
+  out.official=out.both.length+out.shepMiss.length+out.noGroup.length+out.notSubmitted.length+out.nfMiss.length+unlinked.length;
+  return out;
+}
+function drawRecon(){const el=$('#wRecon');if(!el)return;
+  const R=reconcile(sorted(),att,checked()),chip=(x,c='')=>`<span class="chip ${c}">${esc(x.name)}${x.g?` <small>${esc(x.g.name)}</small>`:''}</span>`;
+  const sec=(title,list,c,help)=>list.length?`<h3>${title} ${list.length}명</h3>${help?`<p class="note">${help}</p>`:''}<div class="chips">${list.map(x=>chip(x,c)).join('')}</div>`:'';
+  const byG={};[...R.shepMiss,...R.nfMiss].forEach(x=>{byG[x.g.name]=(byG[x.g.name]||0)+1});
+  el.innerHTML=`<div class="tally recon"><div><div class="big">${R.official}<span>명</span></div><div class="note">공식 출석 · 한 곳이라도 체크한 사람</div></div>
+    <div class="kpis"><div class="kpi"><span>양쪽 일치</span><b>${R.both.length}명</b></div>
+    <div class="kpi"><span>목자 쪽 누락</span><b>${R.shepMiss.length}명</b></div>
+    <div class="kpi"><span>새가족팀 쪽 누락</span><b>${R.nfMiss.length}명</b></div>
+    <div class="kpi"><span>목장 없음</span><b>${R.noGroup.length}명</b></div></div></div>
+    ${Object.keys(byG).length?`<p class="note">불일치 목장: ${Object.entries(byG).map(([n,c])=>`${esc(n)} ${c}명`).join(' · ')}</p>`:''}
+    ${sec('목자 쪽 누락',R.shepMiss,'n','새가족팀은 출석으로 체크했는데 목자는 결석으로 냈어요.')}
+    ${sec('새가족팀 쪽 누락',R.nfMiss,'w','목자는 출석으로 냈는데 새가족팀 체크에는 없어요.')}
+    ${sec('목장 미제출',R.notSubmitted,'','소속 목장이 아직 출석을 내지 않았어요.')}
+    ${sec('목장 없음 · 배정 필요',R.noGroup,'','올해 어느 목장 명단에도 없어요.')}
+    ${sec('교인 명단과 연결 안 됨',R.unlinked,'','목장 명단의 이름이 교인 명단과 연결되지 않아 비교할 수 없어요. 목자에게 명단 수정을 부탁해 주세요.')}
+    ${!R.shepMiss.length&&!R.nfMiss.length&&!R.noGroup.length&&!R.notSubmitted.length&&!R.unlinked.length?'<div class="empty">불일치가 없어요.</div>':''}`;
+}
+
 /* ---------- 새가족팀: 이름 검색 출석, 연락처, 새가족 등록 ---------- */
 let wq='',wOpen='',wReg=false;const cCache={};
 const memberIdFor=(name,birth)=>'m_'+birth.replace(/-/g,'')+'_'+name.replace(/[\/\s]+/g,'');   // 시트 가져오기와 같은 규칙
@@ -413,7 +453,7 @@ const checked=()=>welcome?.checked||{};
 function renderWelcome(){
   const box=$('#welcomeBody');
   if(role!=='nf'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">새가족팀 전용이에요</h2><p>새가족팀 비밀번호로 들어와야 볼 수 있어요.</p></div>`;return}
-  if(typing('#v-welcome')&&box.querySelector('#ws')){drawWResults();drawWChecked();return}
+  if(typing('#v-welcome')&&box.querySelector('#ws')){drawWResults();drawWChecked();drawRecon();return}
   const open=yearOpen(curYear()),n=Object.keys(checked()).length;
   box.innerHTML=`<div class="ghead"><h2>새가족팀 출석 <span class="note">${date.replace(/-/g,'.')} 주일 · <b id="wN">${n}</b>명</span></h2>
     ${open?'<button class="btn sm" id="wRegBtn">+ 새가족 등록</button>':''}</div>
@@ -422,10 +462,11 @@ function renderWelcome(){
     <div class="field"><label for="ws">이름 검색</label><input type="search" id="ws" placeholder="이름 두세 글자" autocomplete="off" value="${esc(wq)}"></div>
     <div id="wRes" class="wlist"></div>
     <h3>오늘 출석 체크한 사람</h3><div id="wChk" class="wlist"></div>
-    <div id="wCard"></div>`;
+    <div id="wCard"></div>
+    <h2>대조 · 새가족팀 체크 ↔ 목자 체크</h2><div id="wRecon"></div>`;
   $('#ws').oninput=e=>{wq=e.target.value;drawWResults()};
   if(open)$('#wRegBtn').onclick=()=>{wReg=!wReg;drawWReg()};
-  drawWReg();drawWResults();drawWChecked();drawWCard();
+  drawWReg();drawWResults();drawWChecked();drawWCard();drawRecon();
 }
 const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(m.name)}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
   ${yearOpen(curYear())?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
