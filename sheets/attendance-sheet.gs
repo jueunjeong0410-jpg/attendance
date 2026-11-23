@@ -8,13 +8,15 @@
  *   - 맨 위 3번째 줄: 날짜별 총 참석(O+△), 4번째 줄: 날짜별 방문자 수 합계
  *
  * 설정 (코드에는 비밀번호를 적지 않아요):
- *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성에 4개를 넣어 주세요.
- *     FIREBASE_API_KEY     Firebase 웹 설정의 apiKey
- *     FIREBASE_PROJECT_ID  Firebase 웹 설정의 projectId
- *     VIEWER_EMAIL         보기 계정 이메일 (예: viewer@youth.app)
- *     VIEWER_PASSWORD      보기 계정 비밀번호
+ *   Apps Script 왼쪽 톱니바퀴(프로젝트 설정) → 스크립트 속성
+ *     FIREBASE_PROJECT_ID  Firebase 웹 설정의 projectId (필수)
+ *   Firebase 읽기는 이 스크립트 주인의 구글 로그인으로 해요(비밀번호 필요 없음).
+ *   그래서 이 스크립트 주인 = Firebase 프로젝트 주인이어야 하고, appsscript.json에 datastore 권한이 있어야 해요.
+ *   (예전 방식) 구글 로그인이 안 되면 스크립트 속성의 FIREBASE_API_KEY·VIEWER_EMAIL·VIEWER_PASSWORD로 로그인해요.
  *
- * 주의: 연도별 출석현황 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
+ * 분기별 통계: '분기별통계' 탭을 맨 앞에 두고 분기마다 한 줄씩 채워요. 계산은 'report' 파일(앱의 report.js와 같은 내용)에 있어요.
+ *
+ * 주의: 연도별 출석현황 시트와 분기별통계 탭은 업데이트할 때마다 새로 그려져요. 직접 적은 내용은 지워져요.
  */
 
 var SHEET_NAME = '출석현황';   // 연도별 시트 이름: '2026 출석현황' 처럼 앞에 연도가 붙어요
@@ -26,6 +28,8 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('출석')
     .addItem('지금 업데이트', 'updateAttendanceSheet')
     .addItem('1시간마다 자동 업데이트 켜기', 'turnOnHourlyUpdate')
+    .addSeparator()
+    .addItem('교인 명단 가져오기 (전체인원 탭 → 앱)', 'importRoster')
     .addToUi();
 }
 
@@ -39,26 +43,97 @@ function turnOnHourlyUpdate() {
 
 /* ---------- 실행 ---------- */
 function updateAttendanceSheet() {
-  var p = PropertiesService.getScriptProperties().getProperties();
-  ['FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'VIEWER_EMAIL', 'VIEWER_PASSWORD'].forEach(function (k) {
-    if (!p[k]) throw new Error('스크립트 속성에 ' + k + ' 값이 없어요.');
-  });
-  var token = signIn_(p);
+  var p = props_();
+  var token = auth_(p);
   var groups = listDocs_(p, token, 'groups');
   var records = listDocs_(p, token, 'attendance');
+  var welcomes = listDocs_(p, token, 'welcome');
+  var members = listDocs_(p, token, 'members');
   var thisYear = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy'));
   var ss = SpreadsheetApp.getActive();
   // 예전 '출석현황' 시트가 있으면 지우지 않고 올해 시트 이름으로 바꿔 써요
   var old = ss.getSheetByName(SHEET_NAME);
   if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
+  // 분기별 통계는 언제나 맨 앞 탭
+  var qs = writeQuarterSheet_(buildQuarterGrid(groups, records, welcomes, members));
+  ss.setActiveSheet(qs); ss.moveActiveSheet(1);
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
-    var sh = writeSheet_(buildGrid(groups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
-    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);   // 최신 연도가 맨 앞
+    // 목장은 해마다 새로 짜요. 그 해 목장만 쓰고, 다른 해 목장 이름은 기록에 남은 이름 그대로 둬요
+    var yearGroups = groups.filter(function (g) { return groupYear(g) === y; });
+    var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
+    ss.setActiveSheet(sh); ss.moveActiveSheet(Math.min(i + 2, ss.getSheets().length));   // 분기별통계 다음, 최신 연도부터
   });
 }
 
+/* ---------- 분기별 통계 탭 ---------- */
+var QUARTER_SHEET = '분기별통계';
+var Q_HEAD = ['분기', '기간', '주일 수', '평균 예배 출석(공식)', '평균 목장모임', '최고', '최저', '방문자 합계', '주일 평균 방문자', '새가족 등록', '새가족 3회 이상 출석', '목장 명단 인원', '4주 연속 결석'];
+
+// 시트에 쓸 값 만들기 (순수 계산: 테스트 대상)
+function buildQuarterGrid(groups, records, welcomes, members) {
+  var qs = quartersWithData(records, welcomes).reverse();   // 최신 분기부터
+  var stats = qs.map(function (q) { return quarterStats(q, groups, records, welcomes, members); });
+  var rows = [['청년부 분기별 통계', ''], [''], Q_HEAD];
+  var sections = { summaryHead: 3, rateHeads: [], absentHead: 0 };
+  stats.forEach(function (s) {
+    rows.push([s.label, s.from.slice(5).replace('-', '/') + ' ~ ' + s.to.slice(5).replace('-', '/'), s.sundays, s.avgOfficial, s.avgGroup,
+      s.maxOfficial, s.minOfficial, s.guests, s.avgGuests, s.newcomers, s.settled, s.roster, s.absent4.length]);
+  });
+  if (!stats.length) rows.push(['아직 출석 기록이 없어요']);
+  // 연도별 목장 출석률(%) 표: 목장 × 1~4분기
+  var years = {};
+  stats.forEach(function (s) { years[s.q.slice(0, 4)] = true; });
+  Object.keys(years).sort().reverse().forEach(function (y) {
+    rows.push(['']);
+    sections.rateHeads.push(rows.length + 1);
+    rows.push([y + '년 목장별 출석률(%)', '1분기', '2분기', '3분기', '4분기']);
+    var byQ = {};
+    stats.forEach(function (s) { if (s.q.slice(0, 4) === y) byQ[s.q.slice(-1)] = s; });
+    var names = [], seen = {};
+    [1, 2, 3, 4].forEach(function (n) { (byQ[n] ? byQ[n].groupRates : []).forEach(function (g) { if (!seen[g.gid]) { seen[g.gid] = true; names.push(g); } }); });
+    names.forEach(function (g) {
+      rows.push([g.name].concat([1, 2, 3, 4].map(function (n) {
+        var r = byQ[n] && byQ[n].groupRates.filter(function (x) { return x.gid === g.gid; })[0];
+        return r && r.rate != null ? r.rate : '';
+      })));
+    });
+  });
+  // 최근 분기 4주 연속 결석 명단
+  if (stats.length && stats[0].absent4.length) {
+    rows.push(['']);
+    sections.absentHead = rows.length + 1;
+    rows.push([stats[0].label + ' 4주 연속 결석', '목장']);
+    stats[0].absent4.forEach(function (a) { rows.push([a.name, a.group]); });
+  }
+  var width = Q_HEAD.length;
+  rows = rows.map(function (r) { var x = r.slice(); while (x.length < width) x.push(''); return x; });
+  return { values: rows, width: width, sections: sections, quarters: stats.length };
+}
+
+function writeQuarterSheet_(grid) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(QUARTER_SHEET) || ss.insertSheet(QUARTER_SHEET);
+  sh.clear(); sh.clearConditionalFormatRules();
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  sh.setFrozenRows(0); sh.setFrozenColumns(0);
+  var v = grid.values;
+  if (sh.getMaxColumns() < grid.width) sh.insertColumnsAfter(sh.getMaxColumns(), grid.width - sh.getMaxColumns());
+  sh.getRange(1, 1, v.length, grid.width).setValues(v);
+  sh.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  sh.getRange(1, 2).setValue('업데이트 ' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'M/d HH:mm')).setFontColor('#5b6b62');
+  sh.getRange(grid.sections.summaryHead, 1, 1, grid.width).setFontWeight('bold').setBackground('#1f5c3f').setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
+  grid.sections.rateHeads.forEach(function (r) { sh.getRange(r, 1, 1, 5).setFontWeight('bold').setBackground('#cfe6d6').setFontColor('#1f5c3f'); });
+  if (grid.sections.absentHead) sh.getRange(grid.sections.absentHead, 1, 1, 2).setFontWeight('bold').setBackground('#fbe3dc').setFontColor('#b3402a');
+  sh.setFrozenRows(grid.sections.summaryHead);
+  sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 110);
+  sh.setColumnWidths(3, grid.width - 2, 92);
+  return sh;
+}
+
 /* ---------- 연도별 시트 ---------- */
+var LEGACY_YEAR = 2026;   // 연도 표시가 없는 예전 목장은 2026년 목장
+function groupYear(g) { return Number(g.year) || LEGACY_YEAR; }
 function sheetNameForYear(y) { return y + ' ' + SHEET_NAME; }
 
 // 기록이 있는 연도 + 올해(기록이 없어도 빈 표를 만들어 둠), 최신 연도부터
@@ -93,6 +168,26 @@ function runUpdateSafely_() {
 }
 
 /* ---------- Firebase 읽기 ---------- */
+function props_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  if (!p.FIREBASE_PROJECT_ID) throw new Error('스크립트 속성에 FIREBASE_PROJECT_ID 값이 없어요.');
+  return p;
+}
+function docsUrl_(p) {
+  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(p.FIREBASE_PROJECT_ID) + '/databases/(default)/documents';
+}
+// 1순위: 스크립트 주인의 구글 로그인(비밀번호 없음). 2순위(예전 방식): 보기 계정 비밀번호
+function auth_(p) {
+  var t = null;
+  try { t = ScriptApp.getOAuthToken(); } catch (e) { t = null; }
+  if (t) {
+    var h = { Authorization: 'Bearer ' + t, 'X-Goog-User-Project': p.FIREBASE_PROJECT_ID };
+    var res = UrlFetchApp.fetch(docsUrl_(p) + '/groups?pageSize=1', { headers: h, muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) return { headers: h, admin: true };
+  }
+  if (p.VIEWER_PASSWORD) return { headers: { Authorization: 'Bearer ' + signIn_(p) }, admin: false };
+  throw new Error('Firebase에 접속하지 못했어요. 이 스크립트 주인이 Firebase 프로젝트 주인인지, appsscript.json에 datastore 권한이 있는지 확인해 주세요.');
+}
 function signIn_(p) {
   var res = UrlFetchApp.fetch(
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(p.FIREBASE_API_KEY), {
@@ -103,13 +198,12 @@ function signIn_(p) {
   return JSON.parse(res.getContentText()).idToken;
 }
 
-function listDocs_(p, token, collection) {
+function listDocs_(p, auth, collection) {
   var out = [], pageToken = '';
   do {
-    var url = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(p.FIREBASE_PROJECT_ID) +
-      '/databases/(default)/documents/' + collection + '?pageSize=300' +
+    var url = docsUrl_(p) + '/' + collection + '?pageSize=300' +
       (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
-    var res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    var res = UrlFetchApp.fetch(url, { headers: auth.headers, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) throw new Error(collection + ' 읽기 실패 (코드 ' + res.getResponseCode() + ')');
     var body = JSON.parse(res.getContentText());
     (body.documents || []).forEach(function (d) {
@@ -182,9 +276,9 @@ function buildGrid(groups, records, title) {
   sorted.forEach(function (g) {
     addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }));
   });
-  // 삭제된 목장이라도 기록이 있으면 아래에 남겨요
+  // 목장 목록에 없는 기록(삭제된 목장, 다른 해 목장)도 기록에 남은 목장 이름 그대로 아래에 남겨요
   records.forEach(function (r) {
-    if (r.gid && !seenGroup[r.gid]) addGroup(r.gid, (r.groupName || '삭제된 목장') + ' (삭제됨)', []);
+    if (r.gid && !seenGroup[r.gid]) addGroup(r.gid, r.groupName || '이름 없는 목장', []);
   });
 
   // 열: 기록이 있는 달마다 그 달의 주일 + (주일이 아닌 날 기록), 마지막 기록 날짜까지
@@ -295,4 +389,89 @@ function writeSheet_(grid, sheetName) {
     sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('X', '#fbe3dc', '#b3402a')]);
   }
   return sh;
+}
+
+/* ---------- 교인 명단 가져오기 (한 번만 쓰는 기능) ----------
+ * '전체인원' 탭(출결버스에서 내려받은 명단)을 앱의 교인 명단으로 옮겨요.
+ *   members  : 이름, 출생연도, 목장 힌트(시트의 '학교' 칸), 등록일   → 앱에 로그인한 모두가 봄
+ *   contacts : 전화번호, 주소, 생년월일, 메모                         → 새가족팀만 봄
+ * 이미 앱에 있는 사람(같은 문서 이름)은 건드리지 않아요. 그래서 여러 번 눌러도 중복되지 않아요.
+ * 스크립트 주인의 구글 로그인(관리자 권한)이 있어야 해요.
+ */
+var ROSTER_SHEET = '전체인원';
+
+function importRoster() {
+  var p = props_(), auth = auth_(p);
+  if (!auth.admin) throw new Error('명단 가져오기는 스크립트 주인의 구글 로그인으로만 할 수 있어요.');
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROSTER_SHEET);
+  if (!sh) throw new Error("'" + ROSTER_SHEET + "' 탭이 없어요.");
+  var plan = rosterToDocs(sh.getDataRange().getValues());
+  var have = {};
+  listDocs_(p, auth, 'members').forEach(function (m) { have[m.id] = true; });
+  var todo = plan.filter(function (x) { return !have[x.id]; });
+  var base = 'projects/' + p.FIREBASE_PROJECT_ID + '/databases/(default)/documents/';
+  for (var i = 0; i < todo.length; i += 200) {
+    var writes = [];
+    todo.slice(i, i + 200).forEach(function (x) {
+      writes.push({ update: { name: base + 'members/' + x.id, fields: toFields_(x.member) }, currentDocument: { exists: false } });
+      writes.push({ update: { name: base + 'contacts/' + x.id, fields: toFields_(x.contact) } });
+    });
+    var res = UrlFetchApp.fetch(docsUrl_(p).replace(/\/documents$/, '/documents:commit'), {
+      method: 'post', contentType: 'application/json', headers: auth.headers, muteHttpExceptions: true,
+      payload: JSON.stringify({ writes: writes })
+    });
+    if (res.getResponseCode() !== 200) throw new Error('명단 저장 실패 (코드 ' + res.getResponseCode() + ')');
+  }
+  var msg = '새로 ' + todo.length + '명을 앱에 넣었어요. (이미 있던 ' + (plan.length - todo.length) + '명은 그대로)';
+  try { SpreadsheetApp.getActive().toast(msg, '교인 명단'); } catch (e) {}
+  return msg;
+}
+
+// 전화번호: 시트에는 맨 앞 0이 빠져 있어요(1040994643) → 010-4099-4643
+function formatPhone(v) {
+  var d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+  if (d.length === 10 && d.charAt(0) === '1') d = '0' + d;
+  if (d.length === 11) return d.slice(0, 3) + '-' + d.slice(3, 7) + '-' + d.slice(7);
+  if (d.length === 10) return d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6);
+  return d;
+}
+function ymd_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd');
+  var m = String(v == null ? '' : v).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : '';
+}
+// 교인 문서 이름: m_생년월일_이름 (생일이 없으면 m_이름_줄번호). 앱에서 새로 등록할 때도 같은 규칙
+function memberId(name, birth, row) {
+  var n = String(name).replace(/[\/\s]+/g, '');
+  return birth ? 'm_' + birth.replace(/-/g, '') + '_' + n : 'm_' + n + '_' + row;
+}
+// 시트 값 → 앱에 넣을 문서 목록 (시트·Firebase와 무관한 순수 계산: 테스트 대상)
+function rosterToDocs(rows) {
+  var head = (rows[0] || []).map(function (h) { return String(h).trim(); });
+  var col = function (name) { return head.indexOf(name); };
+  var c = { name: col('이름'), birth: col('생년월일'), hint: col('학교'), phone: col('학생전화'), addr: col('주소'), memo: col('메모'), reg: col('등록일') };
+  if (c.name < 0) throw new Error("'이름' 칸을 찾지 못했어요.");
+  var get = function (r, k) { return c[k] < 0 ? '' : r[c[k]]; };
+  var out = [], seen = {};
+  rows.slice(1).forEach(function (r, i) {
+    var name = String(get(r, 'name') || '').trim();
+    if (!name) return;
+    var birth = ymd_(get(r, 'birth')), id = memberId(name, birth, i + 2);
+    if (seen[id]) return; seen[id] = true;
+    var member = { name: name, status: 'active', hint: String(get(r, 'hint') || '').trim().slice(0, 40), registeredAt: ymd_(get(r, 'reg')) };
+    if (birth) member.birthYear = Number(birth.slice(0, 4));
+    var contact = { phone: formatPhone(get(r, 'phone')), address: String(get(r, 'addr') || '').trim(), birth: birth, memo: String(get(r, 'memo') || '').trim() };
+    out.push({ id: id, member: member, contact: contact });
+  });
+  return out;
+}
+function toValue_(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  return { stringValue: String(v) };
+}
+function toFields_(o) {
+  var f = {};
+  Object.keys(o).forEach(function (k) { f[k] = toValue_(o[k]); });
+  return f;
 }

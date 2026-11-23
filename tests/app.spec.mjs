@@ -5,6 +5,7 @@ import { test, expect } from '@playwright/test';
 
 const EDIT_PW = '1234';
 const VIEW_PW = '0000';
+const NF_PW = '5678';   // 체험 모드 전용 새가족팀 비밀번호
 
 async function login(page, pw) {
   await page.fill('#pw', pw);
@@ -183,10 +184,10 @@ test('저장하면 구글 시트에 업데이트 신호를 보내고, 연달아 
   expect(Number(await (await request.get('/__pings')).text())).toBeGreaterThanOrEqual(2);
 });
 
-test('편집 권한이면 구글 시트 버튼이 새 탭 링크로 열린다', async ({ page }) => {
+test('구글 시트 버튼은 새가족팀에게만 보이고 새 탭으로 열린다', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전에는 안 보임
-  await login(page, EDIT_PW);
+  await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전
+  await login(page, NF_PW);
   const link = page.locator('#sheetLink');
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute('href', /docs\.google\.com\/spreadsheets\/d\//);
@@ -194,23 +195,65 @@ test('편집 권한이면 구글 시트 버튼이 새 탭 링크로 열린다', 
   await expect(link).toContainText('구글 시트');
 });
 
-test('보기 권한이면 구글 시트로 못 넘어가고 안내가 3초 뒤 사라진다', async ({ page, context }) => {
+for (const [who, pw] of [['목자', EDIT_PW], ['보기', VIEW_PW]]) {
+  test(`${who} 권한에는 구글 시트 버튼도 링크 주소도 없다`, async ({ page }) => {
+    await page.goto('/');
+    await login(page, pw);
+    await expect(page.locator('#v-dashboard')).toBeVisible();
+    const link = page.locator('#sheetLink');
+    await expect(link).toBeHidden();
+    expect(await link.getAttribute('href')).toBeNull();
+  });
+}
+
+test('새가족팀은 목장 출석 체크·명단 수정을 못 한다', async ({ page }) => {
   await page.goto('/');
-  await login(page, VIEW_PW);
-  const link = page.locator('#sheetLink');
-  await expect(link).toBeVisible();
-  expect(await link.getAttribute('href')).toBeNull();               // 주소 자체가 없음(길게 눌러 복사도 불가)
-  let opened = false; context.on('page', () => { opened = true });
-  await link.click();
-  const t = page.locator('#toast');
-  await expect(t).toHaveText('뷰어 기능에선 지원하지 않는 기능입니다.');
-  await expect(t).toHaveClass(/on/);
-  await page.waitForTimeout(2500);
-  await expect(t).toHaveClass(/on/);                                 // 2.5초엔 아직 보임
-  await page.waitForTimeout(800);
-  await expect(t).not.toHaveClass(/on/);                             // 3초 뒤 사라짐
-  expect(opened).toBe(false);
-  expect(page.url()).not.toContain('docs.google.com');
+  await login(page, NF_PW);
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('새가족팀으로 들어오셨어요');
+  await expect(page.locator('#make13')).toHaveCount(0);
+  await expect(page.locator('#edit')).toHaveCount(0);
+});
+
+test('연도가 바뀌면 목장을 새로 만들고, 지난 연도 목장·기록은 그대로 남는다', async ({ page }) => {
+  await setupGroups(page);                                   // 올해(2026) 목장 13개
+  await fillRoster(page, ['가목자', '나하늘']);
+  await page.click('.m[data-n="나하늘"]');
+  await page.click('#submit');
+  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
+  const sunday = await page.inputValue('#date');
+
+  // 2027년 주일로 가면 2026년 목장은 안 보이고 새로 만들 수 있다
+  await page.fill('#date', '2027-01-03');
+  await expect(page.locator('#make13')).toBeVisible();
+  await page.click('#make13');
+  await expect(page.locator('.gp')).toHaveCount(13);
+  await page.click('#edit');
+  await page.fill('#en', '테스트 목장');                     // 2027년 목장 이름을 같은 이름으로 바꿔도
+  await page.fill('#em', '새목원');
+  await page.click('#eSave');
+
+  // 2026년으로 돌아가면 예전 명단·기록이 그대로
+  await page.fill('#date', sunday);
+  await page.goto('/#dashboard');
+  await expect(page.locator('#rows .row')).toHaveCount(13);
+  await page.click('[data-open]');
+  await expect(page.locator('.detail')).toContainText('나하늘');
+  await expect(page.locator('.detail')).not.toContainText('새목원');
+  const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const ids = Object.keys(demo.groups);
+  expect(ids.filter(i => i.startsWith('2027_')).length).toBe(13);  // 새해 목장은 따로 저장
+  expect(ids.filter(i => /^g\d+$/.test(i) || i.startsWith('2026_')).length).toBe(13);
+});
+
+test('지난 연도는 출석·명단을 고칠 수 없다 (보기만)', async ({ page }) => {
+  await page.goto('/');
+  await login(page, EDIT_PW);
+  await page.fill('#date', '2025-11-30');
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('지난 연도');
+  await expect(page.locator('#make13')).toHaveCount(0);
+  await expect(page.locator('#submit')).toHaveCount(0);
 });
 
 test('출석체크에 제출자 칸이 없다', async ({ page }) => {
@@ -266,4 +309,235 @@ test('화면 왼쪽 위 제목은 "강서성결교회 청년부 출석부"이고
   await expect(page.locator('.top h1')).toHaveText('강서성결교회 청년부 출석부');
   await expect(page.locator('body')).not.toContainText('Made by');
   await expect(page.locator('.top')).not.toContainText('연결됨');
+});
+
+/* ---------- 교인 명단 연결 ---------- */
+// 체험 모드 저장소에 가짜 교인 명단을 미리 넣어요
+async function seed(page, data) {
+  await page.goto('/');
+  await page.evaluate((d) => localStorage.setItem('demo', JSON.stringify(d)), data);
+  await page.reload();
+}
+const FAKE_MEMBERS = {
+  m_19960215_가하늘: { name: '가하늘', birthYear: 1996, hint: '가목장', status: 'active' },
+  m_20010628_다은혜: { name: '다은혜', birthYear: 2001, hint: '새가족팀', status: 'active' },
+  m_20050327_다은혜: { name: '다은혜', birthYear: 2005, hint: '라목장', status: 'active' },
+};
+
+test('명단 수정: 교인 명단과 연결되고, 동명이인은 목자가 골라서 저장·제출된다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, EDIT_PW);
+  await page.goto('/#check');
+  await page.click('#make13');
+  await page.click('#edit');
+  await page.fill('#em', '가하늘\n다은혜\n없는사람');
+  await expect(page.locator('.lk.ok')).toContainText('가하늘');
+  await expect(page.locator('.lk.warn')).toContainText('동명이인 2명');
+  await expect(page.locator('.lk.no')).toContainText('없는사람');
+  await page.selectOption('select[data-lk="다은혜"]', 'm_20050327_다은혜');
+  await page.click('#eSave');
+  await expect(page.locator('.m')).toHaveCount(3);
+  let demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const g = Object.values(demo.groups).find(x => x.order === 1);
+  expect(g.members).toEqual([
+    { name: '가하늘', isNew: false, mid: 'm_19960215_가하늘' },
+    { name: '다은혜', isNew: false, mid: 'm_20050327_다은혜' },
+    { name: '없는사람', isNew: false },
+  ]);
+  // 다시 열면 고른 사람이 그대로 선택돼 있다
+  await page.click('#edit');
+  await expect(page.locator('select[data-lk="다은혜"]')).toHaveValue('m_20050327_다은혜');
+  await page.click('#eCancel');
+  // 제출하면 이름 → 교인 id 가 함께 저장된다
+  await page.click('.m[data-n="가하늘"]');
+  await page.click('.m[data-n="다은혜"]');
+  await page.click('#submit');
+  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
+  demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const rec = Object.values(demo.att)[0];
+  expect(rec.ids).toEqual({ 가하늘: 'm_19960215_가하늘', 다은혜: 'm_20050327_다은혜' });
+});
+
+test('보기·목자 권한은 연락처(전화번호)를 읽을 수 없다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: { m_19960215_가하늘: { phone: '010-9999-1111' } } });
+  for (const pw of [EDIT_PW, VIEW_PW]) {
+    await page.goto('/');
+    await login(page, pw);
+    await expect(page.locator('#v-dashboard')).toBeVisible();
+    for (const h of ['#dashboard', '#check', '#welcome']) {
+      await page.goto('/' + h);
+      expect(await page.locator('body').innerText()).not.toContain('010-9999-1111');
+    }
+    const err = await page.evaluate(async () => { try { await window.__store.getContact('m_19960215_가하늘'); return 'read'; } catch (e) { return e.code; } });
+    expect(err).toBe('permission-denied');
+    await page.evaluate(() => window.__store.logout());
+  }
+});
+
+/* ---------- 새가족팀 페이지 ---------- */
+const FAKE_CONTACTS = { m_19960215_가하늘: { phone: '010-1234-5678', address: '가짜시 가짜동 1', birth: '1996-02-15', memo: '' } };
+
+test('새가족 탭은 새가족팀에게만 보인다', async ({ page }) => {
+  await page.goto('/');
+  await login(page, EDIT_PW);
+  await expect(page.locator('#tabWelcome')).toBeHidden();
+  await page.goto('/#welcome');
+  await expect(page.locator('#welcomeBody')).toContainText('새가족팀 전용');
+  await expect(page.locator('#ws')).toHaveCount(0);
+});
+
+test('새가족팀: 이름 검색 → 출석 → 취소, 인원 수가 바로 바뀐다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  await login(page, NF_PW);
+  await expect(page.locator('#tabWelcome')).toBeVisible();
+  await page.click('#tabWelcome');
+  await page.fill('#ws', '은혜');
+  await expect(page.locator('#wRes .wr')).toHaveCount(2);                     // 동명이인 둘 다, 출생연도로 구분
+  await expect(page.locator('#wRes')).toContainText('01년생');
+  await expect(page.locator('#wRes')).toContainText('05년생');
+  await page.click('#wRes [data-chk="m_20050327_다은혜"]');
+  await expect(page.locator('#wN')).toHaveText('1');
+  await expect(page.locator('#wChk')).toContainText('다은혜');
+  await page.click('#wChk [data-chk="m_20050327_다은혜"]');                  // 취소
+  await expect(page.locator('#wN')).toHaveText('0');
+  await page.fill('#ws', '없는이름');
+  await expect(page.locator('#wRes')).toContainText('새가족 등록');
+});
+
+test('새가족팀: 이름을 누르면 전화번호(바로 걸기)·주소가 보인다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  await page.fill('#ws', '가하늘');
+  await page.click('#wRes [data-card="m_19960215_가하늘"]');
+  await expect(page.locator('#wCard a.tel')).toHaveAttribute('href', 'tel:01012345678');
+  await expect(page.locator('#wCard')).toContainText('가짜시 가짜동 1');
+});
+
+test('새가족 등록: 전화번호 필수, 등록하면 명단·연락처에 저장되고 오늘 출석도 체크, 중복 등록은 막힘', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  await page.click('#wRegBtn');
+  await page.fill('#rName', '신소망');
+  await page.fill('#rBirth', '2003-04-05');
+  await page.click('#rSave');
+  await expect(page.locator('#rMsg')).toContainText('전화번호');
+  await page.fill('#rPhone', '1055556666');                                   // 앞 0 없이 써도
+  await page.fill('#rAddr', '가짜구 가짜로 2');
+  await page.click('#rSave');
+  await expect(page.locator('#wN')).toHaveText('1');
+  const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  expect(demo.members['m_20030405_신소망']).toMatchObject({ name: '신소망', birthYear: 2003, isNew: true, status: 'active' });
+  expect(demo.members['m_20030405_신소망'].phone).toBeUndefined();          // 모두가 보는 명단엔 전화번호 없음
+  expect(demo.contacts['m_20030405_신소망']).toMatchObject({ phone: '010-5555-6666', address: '가짜구 가짜로 2', birth: '2003-04-05' });
+  // 같은 사람 다시 등록 → 막힘
+  await page.click('#wRegBtn');
+  await page.fill('#rName', '신소망');
+  await page.fill('#rBirth', '2003-04-05');
+  await page.fill('#rPhone', '010-5555-6666');
+  await page.click('#rSave');
+  await expect(page.locator('#rMsg')).toContainText('이미 등록된');
+});
+
+test('새가족팀: 지난 연도는 출석 체크·등록을 할 수 없다', async ({ page }) => {
+  await seed(page, { members: FAKE_MEMBERS });
+  await login(page, NF_PW);
+  await page.fill('#date', '2025-11-30');
+  await page.goto('/#welcome');
+  await expect(page.locator('#welcomeBody')).toContainText('지난 연도');
+  await expect(page.locator('#wRegBtn')).toHaveCount(0);
+  await page.fill('#ws', '가하늘');
+  await expect(page.locator('#wRes [data-chk]')).toHaveCount(0);
+});
+
+/* ---------- 대조 ---------- */
+async function seedRecon(page) {
+  await page.goto('/');
+  const d = await page.inputValue('#date');
+  const M = { ...FAKE_MEMBERS,
+    m_19990101_나목원: { name: '나목원', birthYear: 1999, status: 'active' },
+    m_20000101_라목원: { name: '라목원', birthYear: 2000, status: 'active' },
+    m_20060101_신입: { name: '신입', birthYear: 2006, status: 'active', isNew: true } };
+  const groups = {
+    '2026_g01': { id: '2026_g01', year: 2026, name: '가목장', order: 1, members: [
+      { name: '가하늘', mid: 'm_19960215_가하늘' }, { name: '다은혜', mid: 'm_20050327_다은혜' },
+      { name: '나목원', mid: 'm_19990101_나목원' }, { name: '연결안됨' }] },
+    '2026_g02': { id: '2026_g02', year: 2026, name: '라목장', order: 2, members: [{ name: '라목원', mid: 'm_20000101_라목원' }] },
+  };
+  const att = { [`${d}_2026_g01`]: { date: d, gid: '2026_g01', groupName: '가목장', present: ['가하늘', '나목원'], worship: ['연결안됨'], absent: ['다은혜'],
+    ids: { 가하늘: 'm_19960215_가하늘', 나목원: 'm_19990101_나목원', 다은혜: 'm_20050327_다은혜' } } };
+  const ck = (name) => ({ name, at: '2026-01-01T00:00:00Z' });
+  const welcome = { [d]: { date: d, checked: { m_19960215_가하늘: ck('가하늘'), m_20050327_다은혜: ck('다은혜'), m_20060101_신입: ck('신입'), m_20000101_라목원: ck('라목원') } } };
+  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { members: M, groups, att, welcome });
+  await page.reload();
+}
+
+test('대조: 일치·목자 쪽 누락·새가족팀 쪽 누락·목장 없음·미제출·연결 안 됨을 나눠 보여 준다 (동명이인은 id로 구분)', async ({ page }) => {
+  await seedRecon(page);
+  await login(page, NF_PW);
+  await page.goto('/#welcome');
+  const R = page.locator('#wRecon');
+  await expect(R.locator('.big')).toContainText('6');                        // 공식 출석: 한 곳이라도 체크
+  await expect(R).toContainText('양쪽 일치1명');
+  const sec = async (title) => (await R.locator(`h3:has-text("${title}") + p + .chips`).innerText()).replace(/\s+/g, ' ');
+  expect(await sec('목자 쪽 누락')).toContain('다은혜');                       // 새가족팀 O, 목자 X
+  expect(await sec('새가족팀 쪽 누락')).toContain('나목원');                   // 목자 O, 새가족팀 없음
+  expect(await sec('목장 미제출')).toContain('라목원');
+  expect(await sec('목장 없음')).toContain('신입');
+  expect(await sec('교인 명단과 연결 안 됨')).toContain('연결안됨');
+  await expect(R).toContainText('불일치 목장: 가목장 2명');
+});
+
+test('대시보드 큰 숫자는 공식 출석(목자 체크 + 새가족팀 체크, 한 곳이라도)이다', async ({ page }) => {
+  await seedRecon(page);
+  await login(page, VIEW_PW);
+  await expect(page.locator('#tTotal')).toContainText('6');
+  await expect(page.locator('#tRate')).toContainText('목자 체크 3 · 새가족팀 체크 4');
+});
+
+/* ---------- 분기 보고 ---------- */
+test('보고 탭: 이번 분기 요약 4개·주별 추이·목장별 출석률·4주 연속 결석, 이전 분기로 이동', async ({ page }) => {
+  await page.goto('/');
+  const groups = { '2026_g01': { id: '2026_g01', year: 2026, name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }] },
+    '2026_g02': { id: '2026_g02', year: 2026, name: '라목장', order: 2, members: [{ name: '라은혜' }, { name: '마다온' }] } };
+  const r = (d, gid, present, absent, guests = []) => ({ date: d, gid, present, worship: [], absent, guests });
+  const ds = ['2026-10-04', '2026-10-11', '2026-10-18', '2026-10-25'];
+  const att = {};
+  ds.forEach((d) => { att[d + '_2026_g01'] = r(d, '2026_g01', ['가목자', '나하늘'], []); att[d + '_2026_g02'] = r(d, '2026_g02', ['라은혜'], ['마다온'], d === ds[0] ? ['손님'] : []); });
+  att['2026-09-27_2026_g01'] = r('2026-09-27', '2026_g01', ['가목자'], ['나하늘']);
+  await page.evaluate((x) => localStorage.setItem('demo', JSON.stringify(x)), { groups, att });
+  await page.reload();
+  await login(page, VIEW_PW);
+  await page.click('a[data-v="report"]');
+  await expect(page.locator('#qLabel')).toHaveText('2026년 4분기');
+  const cards = page.locator('.rcard');
+  await expect(cards.nth(0)).toContainText('평균 예배 출석3명');
+  await expect(cards.nth(0)).toContainText('▲ 2명');                     // 3분기 평균 1명 → 3명
+  await expect(cards.nth(3)).toContainText('방문자1명');
+  await expect(page.locator('.rchart circle')).toHaveCount(4);
+  await expect(page.locator('.rb').first()).toContainText('가목장');
+  await expect(page.locator('.rb').first()).toContainText('100%');
+  await expect(page.locator('.rb').nth(1).locator('i.low')).toHaveCount(1);  // 라목장 50% → 빨간색
+  await expect(page.locator('.absent4 summary')).toContainText('1명');     // 마다온
+  await expect(page.locator('#reportBody a[href*="docs.google.com"]')).toHaveCount(0);   // 보기 권한엔 시트 링크 없음
+  await page.click('#qPrev');
+  await expect(page.locator('#qLabel')).toHaveText('2026년 3분기');
+  await expect(page.locator('.rchart circle')).toHaveCount(1);
+});
+
+/* ---------- 보안 ---------- */
+test('보안 정책(CSP)이 있고, 앱의 모든 화면이 정책 위반 없이 동작한다', async ({ page }) => {
+  const violations = [];
+  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(e.violatedDirective + ' ' + e.blockedURI); }); });
+  await seed(page, { members: FAKE_MEMBERS, contacts: FAKE_CONTACTS });
+  expect(await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content')).toContain("object-src 'none'");
+  await login(page, NF_PW);
+  for (const h of ['#dashboard', '#welcome', '#report', '#check']) { await page.goto('/' + h); await page.waitForTimeout(150); }
+  await page.fill('#date', await page.inputValue('#date'));
+  violations.push(...((await page.evaluate(() => window.__csp)) || []).filter(v => !v.includes('fonts.g')));   // 테스트 환경은 글꼴 서버 접속이 막혀 있어 제외
+  expect(violations).toEqual([]);
+  // 바깥 주소로 데이터를 보내는 시도는 막힌다
+  const blocked = await page.evaluate(async () => { try { await fetch('https://example.com/steal'); return 'sent'; } catch (e) { return 'blocked'; } });
+  expect(blocked).toBe('blocked');
 });

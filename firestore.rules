@@ -1,15 +1,99 @@
 rules_version = '2';
 
 // 청년부 출석 앱 보안 규칙
-// - 읽기: 로그인한 교인(보기·편집 계정)만
-// - 쓰기: 편집 계정(목자용)만
-// Firebase 콘솔 > Firestore > 규칙 탭에 게시된 내용과 같아요. 바꿀 때는 둘 다 고쳐 주세요.
+// 계정(권한) 3가지:
+//   viewer@youth.app     보기 (목사님·부장님)        : 출석·명단 보기만
+//   editor@youth.app     목자                        : 목장 명단·목장 출석 쓰기
+//   newfamily@youth.app  새가족팀                    : 교인 명단·새가족 출석 쓰기, 전화번호·주소 보기
+// 원칙:
+//   - 적어 둔 컬렉션 말고는 아무도 읽고 쓸 수 없어요(기본 거부).
+//   - 지난 연도 기록은 고칠 수 없어요. (1월 한 달만 작년 12월 기록을 고칠 수 있어요)
+//   - 출석·교인 기록은 앱에서 지울 수 없어요. (실수 정리는 Firebase 콘솔에서 관리자만)
+//   - 전화번호·주소(contacts)는 새가족팀만 읽고 써요.
+// Firebase 콘솔 > Firestore > 규칙 탭에 게시된 내용과 같아야 해요. 바꿀 때는 둘 다 고쳐 주세요.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.auth.token.email == 'editor@youth.app';
+
+    function email() { return request.auth != null && request.auth.token.email is string ? request.auth.token.email : ''; }
+    function signedIn() { return email() in ['viewer@youth.app', 'editor@youth.app', 'newfamily@youth.app']; }
+    function isEditor() { return email() == 'editor@youth.app'; }
+    function isNF() { return email() == 'newfamily@youth.app'; }
+
+    // 한국 시간(UTC+9) 기준 연도·월
+    function kNow() { return request.time + duration.value(9, 'h'); }
+    function yearOpen(y) { return y >= kNow().year() || (y == kNow().year() - 1 && kNow().month() == 1); }
+    function isDate(d) { return d is string && d.matches('^20[0-9]{2}-[01][0-9]-[0-3][0-9]$'); }
+    function yearOf(d) { return int(d[0:4]); }
+    function str(v, max) { return v is string && v.size() <= max; }
+    function list(v, max) { return v is list && v.size() <= max; }
+
+    // 목장 (연도별). 예전 목장은 year가 없으면 2026년으로 봐요.
+    function validGroup(d) {
+      return d.keys().hasOnly(['id', 'year', 'name', 'leader', 'members', 'order'])
+        && d.year is int && d.name is string && d.name.size() > 0 && d.name.size() <= 40
+        && str(d.get('leader', ''), 40) && list(d.get('members', []), 300);
+    }
+    match /groups/{id} {
+      allow read: if signedIn();
+      allow create: if isEditor() && validGroup(request.resource.data) && yearOpen(request.resource.data.year);
+      allow update: if isEditor() && validGroup(request.resource.data)
+                    && request.resource.data.year == resource.data.get('year', 2026)
+                    && yearOpen(request.resource.data.year);
+      allow delete: if isEditor() && yearOpen(resource.data.get('year', 2026));
+    }
+
+    // 목장 출석 (목자가 제출). 문서 이름은 '날짜_목장id'
+    function validAtt(id, d) {
+      return d.keys().hasOnly(['date', 'gid', 'groupName', 'leader', 'present', 'worship', 'absent',
+                               'newPresent', 'guests', 'note', 'by', 'submittedAt', 'ids'])
+        && isDate(d.date) && d.gid is string && id == d.date + '_' + d.gid
+        && str(d.get('groupName', ''), 40) && str(d.get('note', ''), 2000)
+        && list(d.get('present', []), 300) && list(d.get('worship', []), 300) && list(d.get('absent', []), 300)
+        && list(d.get('newPresent', []), 300) && list(d.get('guests', []), 100)
+        && (!('ids' in d) || (d.ids is map && d.ids.size() <= 300));
+    }
+    match /attendance/{id} {
+      allow read: if signedIn();
+      allow create: if isEditor() && validAtt(id, request.resource.data) && yearOpen(yearOf(request.resource.data.date));
+      allow update: if isEditor() && validAtt(id, request.resource.data) && yearOpen(yearOf(request.resource.data.date))
+                    && request.resource.data.date == resource.data.date && request.resource.data.gid == resource.data.gid;
+      allow delete: if false;
+    }
+
+    // 교인 명단 (이름·출생연도처럼 모두가 봐도 되는 것만). 새가족팀이 등록·수정
+    function validMember(d) {
+      return d.keys().hasOnly(['name', 'birthYear', 'hint', 'status', 'registeredAt', 'firstVisit', 'isNew'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 30
+        && (!('birthYear' in d) || d.birthYear is int)
+        && str(d.get('hint', ''), 40) && d.get('status', 'active') in ['active', 'break', 'left']
+        && str(d.get('registeredAt', ''), 30) && str(d.get('firstVisit', ''), 10)
+        && (!('isNew' in d) || d.isNew is bool);
+    }
+    match /members/{id} {
+      allow read: if signedIn();
+      allow create, update: if isNF() && validMember(request.resource.data);
+      allow delete: if false;
+    }
+
+    // 연락처 (전화번호·주소·생일). 새가족팀만
+    match /contacts/{id} {
+      allow read: if isNF();
+      allow create, update: if isNF()
+        && request.resource.data.keys().hasOnly(['phone', 'address', 'birth', 'memo'])
+        && str(request.resource.data.get('phone', ''), 20) && str(request.resource.data.get('address', ''), 200)
+        && str(request.resource.data.get('birth', ''), 10) && str(request.resource.data.get('memo', ''), 1000)
+        && existsAfter(/databases/$(database)/documents/members/$(id));
+      allow delete: if false;
+    }
+
+    // 새가족팀 출석 (주일마다 문서 하나, 이름은 날짜)
+    match /welcome/{date} {
+      allow read: if signedIn();
+      allow create, update: if isNF() && isDate(date) && yearOpen(yearOf(date))
+        && request.resource.data.keys().hasOnly(['date', 'checked', 'updatedAt'])
+        && request.resource.data.date == date
+        && request.resource.data.checked is map && request.resource.data.checked.size() <= 500;
+      allow delete: if false;
     }
   }
 }

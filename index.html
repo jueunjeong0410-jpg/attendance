@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- 보안: 이 페이지가 불러오거나 연결할 수 있는 곳을 Firebase·구글 시트 스크립트·글꼴로만 제한해요 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://script.google.com https://script.googleusercontent.com; frame-src https://youth-attendance-7a450.firebaseapp.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>청년부 출석</title>
 <meta name="theme-color" content="#1f5c3f">
 <link rel="manifest" href="manifest.json">
@@ -98,6 +101,20 @@ textarea#memo{min-height:84px}
 .toast.on{opacity:1}
 .empty{padding:24px;text-align:center;color:var(--mute);border:2px dashed var(--line);border-radius:14px}
 [hidden]{display:none!important}
+.wlist{display:grid;gap:6px;margin-bottom:14px}.wr{display:flex;align-items:center;gap:8px;justify-content:space-between;border:1px solid var(--line);border-radius:12px;padding:6px 8px 6px 4px}
+.wname{background:none;border:0;text-align:left;padding:6px 8px;cursor:pointer;flex:1}.card{margin-top:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0}.kv dt{color:var(--mute)}.kv dd{margin:0;overflow-wrap:anywhere}
+.tel{font-weight:700;color:var(--green)}
+.qnav{display:flex;align-items:center;gap:8px}.rcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 18px}
+.rcard{background:var(--panel);border-radius:12px;padding:12px}.rcard>span{font-size:13px;color:var(--mute)}.rcard b{display:block;font-size:28px;line-height:1.3}.rcard b small{font-size:14px;color:var(--mute);font-weight:400;margin-left:2px}.rcard div{font-size:13px}
+.up{color:var(--green);font-weight:700}.down{color:var(--red);font-weight:700}
+.rchart{width:100%;height:auto;max-height:240px}.rchart .gl{stroke:var(--line)}.rchart .ax{font-size:10px;fill:var(--mute)}.rchart .l1{fill:none;stroke:var(--green);stroke-width:2.5}.rchart .l2{fill:none;stroke:var(--wheat);stroke-width:2;stroke-dasharray:5 4}.rchart .p1{fill:var(--green)}
+.legend{display:flex;gap:16px;font-size:13px;color:var(--mute);margin:4px 0 16px}.legend i{display:inline-block;width:16px;height:0;border-top:3px solid var(--green);vertical-align:middle;margin-right:5px}.legend .k2{border-top:3px dashed var(--wheat)}
+.rbars{display:grid;gap:6px}.rb{display:grid;grid-template-columns:7em 1fr 3em;align-items:center;gap:8px;font-size:14px}.rb>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rb b{text-align:right}
+.rb .track{height:12px;background:var(--panel);border-radius:6px;overflow:hidden}.rb .track i{display:block;height:100%;background:var(--green);border-radius:0 6px 6px 0}.rb .track i.low{background:var(--red)}.lowtxt{color:var(--red)}
+.absent4{margin:14px 0}.absent4 summary{cursor:pointer;font-weight:700}.linkbtn{background:none;border:0;padding:0;color:var(--green);text-decoration:underline;cursor:pointer;font-size:inherit}
+.links{display:grid;gap:4px;margin:-4px 0 12px}.lk{font-size:14px;padding:6px 10px;border-radius:8px;background:var(--panel)}
+.lk.warn{background:light-dark(#fff4dd,#3a2f14)}.lk.no{color:var(--mute)}.lk select{padding:2px 4px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px}
 @media(max-width:600px){.tally{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -113,6 +130,8 @@ textarea#memo{min-height:84px}
   <nav class="tabs">
     <a href="#dashboard" data-v="dashboard">대시보드</a>
     <a href="#check" data-v="check">출석체크</a>
+    <a href="#welcome" data-v="welcome" id="tabWelcome" hidden>새가족</a>
+    <a href="#report" data-v="report">보고</a>
   </nav>
 </header>
 <main>
@@ -139,10 +158,13 @@ textarea#memo{min-height:84px}
     <div class="foot"><span class="note">출석 정보는 교인 외에 공유하지 말아 주세요.</span><button class="btn ghost sm" id="logoutD">로그아웃</button></div>
   </section>
   <section id="v-check" hidden><div id="checkBody"></div></section>
+  <section id="v-welcome" hidden><div id="welcomeBody"></div></section>
+  <section id="v-report" hidden><div id="reportBody"></div></section>
   <section id="v-login" hidden><div id="loginBody"></div></section>
 </main>
 <div class="toast" id="toast"></div>
 
+<script src="report.js"></script>
 <script type="module">
 /* ================= 설정: Firebase 프로젝트 (youth-attendance) ================= */
 const firebaseConfig = {
@@ -156,7 +178,9 @@ const firebaseConfig = {
 // 참고: 위 값은 비밀번호가 아니라 '어느 Firebase 프로젝트인지' 알려 주는 주소예요.
 // 공개돼도 괜찮고, 실제 보호는 firestore.rules(보안 규칙)와 로그인이 맡아요.
 const EDITOR_EMAIL = "editor@youth.app";   // 편집 계정 (목자용)
-const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (부장님·팀장·목사님용)
+const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (목사님·부장님용)
+const NEWFAMILY_EMAIL = "newfamily@youth.app";   // 새가족팀 계정 (새가족 출석·등록, 연락처, 구글 시트)
+const LEGACY_YEAR = 2026;   // 연도 표시가 없는 예전 목장은 2026년 목장으로 봐요
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/172_ExrhP-i0CqmUnGhPo06DHBjwO3E8N4OOOdQmOmPg/edit";   // 출석현황 구글 시트
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbx3RPm4k2HpVWeWjBYOMtNrksZwiryGhPb-ul7iB1HQ-_YgWhDJ101PWJUbHX7kv6Jeng/exec";   // 구글 시트 스크립트의 웹 앱 주소 (비어 있으면 시트 신호를 보내지 않음)
 /* ========================================================================== */
@@ -166,6 +190,7 @@ const DEMO=!firebaseConfig.projectId;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const toast=(t,ms=2200)=>{const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),ms)};
+const roleOf=em=>!em?'':em===NEWFAMILY_EMAIL?'nf':em===EDITOR_EMAIL?'edit':em===VIEWER_EMAIL?'view':'';
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
 /* ---------- 저장소 (Firebase 또는 체험 모드) ---------- */
@@ -174,32 +199,55 @@ if(!DEMO){
   const [{initializeApp},F,A]=await Promise.all([import(FB+'firebase-app.js'),import(FB+'firebase-firestore.js'),import(FB+'firebase-auth.js')]);
   const app=initializeApp(firebaseConfig),fs=F.getFirestore(app),auth=A.getAuth(app);
   store={
-    onAuth:cb=>A.onAuthStateChanged(auth,u=>cb(!u?'':u.email===EDITOR_EMAIL?'edit':'view')),
-    login:async pw=>{try{await A.signInWithEmailAndPassword(auth,EDITOR_EMAIL,pw)}catch(e){await A.signInWithEmailAndPassword(auth,VIEWER_EMAIL,pw)}},
+    onAuth:cb=>A.onAuthStateChanged(auth,u=>cb(roleOf(u&&u.email))),
+    // 비밀번호 하나로 세 계정을 차례로 시도해요. '너무 많이 틀림' 같은 오류가 나면 바로 멈춰요(계정 잠김 방지).
+    login:async pw=>{let last;for(const em of [NEWFAMILY_EMAIL,EDITOR_EMAIL,VIEWER_EMAIL]){
+      try{await A.signInWithEmailAndPassword(auth,em,pw);return}catch(e){last=e;if(!/invalid|wrong|not-found|user-disabled/.test(e.code||''))throw e}}throw last},
     logout:()=>A.signOut(auth),
     onGroups:(cb,err)=>F.onSnapshot(F.collection(fs,'groups'),s=>cb(s.docs.map(d=>({...d.data(),id:d.id})),s.metadata.fromCache),err),
     onAtt:(date,cb,err)=>F.onSnapshot(F.query(F.collection(fs,'attendance'),F.where('date','==',date)),s=>cb(s.docs.map(d=>d.data())),err),
     setGroup:(id,d)=>F.setDoc(F.doc(fs,'groups',id),d),
     delGroup:id=>F.deleteDoc(F.doc(fs,'groups',id)),
-    setAtt:(id,d)=>F.setDoc(F.doc(fs,'attendance',id),d)
+    setAtt:(id,d)=>F.setDoc(F.doc(fs,'attendance',id),d),
+    // 교인 명단(모두 읽기) · 연락처(새가족팀만) · 새가족팀 출석(주일마다 문서 하나)
+    onMembers:(cb,err)=>F.onSnapshot(F.collection(fs,'members'),s=>cb(s.docs.map(d=>({...d.data(),id:d.id}))),err),
+    getContact:async id=>{const d=await F.getDoc(F.doc(fs,'contacts',id));return d.exists()?d.data():null},
+    addMember:async(id,m,c)=>{const b=F.writeBatch(fs);b.set(F.doc(fs,'members',id),m);b.set(F.doc(fs,'contacts',id),c);await b.commit()},
+    setMember:(id,m)=>F.setDoc(F.doc(fs,'members',id),m),
+    setContact:(id,c)=>F.setDoc(F.doc(fs,'contacts',id),c),
+    onWelcome:(date,cb,err)=>F.onSnapshot(F.doc(fs,'welcome',date),d=>cb(d.exists()?d.data():null),err),
+    checkIn:(date,mid,name)=>F.setDoc(F.doc(fs,'welcome',date),{date,checked:{[mid]:{name,at:new Date().toISOString()}},updatedAt:new Date().toISOString()},{merge:true}),
+    checkOut:(date,mid)=>F.updateDoc(F.doc(fs,'welcome',date),new F.FieldPath('checked',mid),F.deleteField(),'updatedAt',new Date().toISOString()),
+    // 분기 보고: 기간 안의 기록 한 번에 읽기
+    rangeDocs:async(col,from,to)=>(await F.getDocs(F.query(F.collection(fs,col),F.where('date','>=',from),F.where('date','<=',to)))).docs.map(d=>d.data())
   };
 }else{
   const load=()=>{try{return JSON.parse(localStorage.getItem('demo'))||null}catch(e){return null}};
-  let D=load()||{groups:{},att:{}},role='';const subs=new Set();
+  let D=load()||{},role='';D={groups:{},att:{},members:{},contacts:{},welcome:{},...D};const subs=new Set();
   const emit=()=>{ls.set('demo',JSON.stringify(D));subs.forEach(f=>f())};
   const sub=f=>{subs.add(f);setTimeout(f,0);return()=>subs.delete(f)};
   let authCb=()=>{};
   store={
     onAuth:cb=>{authCb=cb;cb(role)},
-    login:async pw=>{if(pw==='1234')role='edit';else if(pw==='0000')role='view';else throw{code:'auth/invalid-credential'};authCb(role)},
+    login:async pw=>{role={'1234':'edit','0000':'view','5678':'nf'}[pw]||'';if(!role)throw{code:'auth/invalid-credential'};authCb(role)},
     logout:async()=>{role='';authCb('')},
     onGroups:cb=>sub(()=>cb(Object.values(D.groups),false)),
     onAtt:(date,cb)=>sub(()=>cb(Object.values(D.att).filter(a=>a.date===date))),
     setGroup:async(id,d)=>{D.groups[id]={...d,id};emit()},
     delGroup:async id=>{delete D.groups[id];emit()},
-    setAtt:async(id,d)=>{D.att[id]=d;emit()}
+    setAtt:async(id,d)=>{D.att[id]=d;emit()},
+    onMembers:cb=>sub(()=>cb(Object.entries(D.members).map(([id,m])=>({...m,id})))),
+    getContact:async id=>{if(role!=='nf')throw{code:'permission-denied'};return D.contacts[id]||null},
+    addMember:async(id,m,c)=>{if(D.members[id])throw{code:'already-exists'};D.members[id]=m;D.contacts[id]=c;emit()},
+    setMember:async(id,m)=>{D.members[id]=m;emit()},
+    setContact:async(id,c)=>{D.contacts[id]=c;emit()},
+    onWelcome:(date,cb)=>sub(()=>cb(D.welcome[date]||null)),
+    checkIn:async(date,mid,name)=>{const w=D.welcome[date]||{date,checked:{}};w.checked[mid]={name,at:new Date().toISOString()};D.welcome[date]=w;emit()},
+    checkOut:async(date,mid)=>{if(D.welcome[date])delete D.welcome[date].checked[mid];emit()},
+    rangeDocs:async(col,from,to)=>Object.values(col==='welcome'?D.welcome:D.att).filter(x=>x.date>=from&&x.date<=to)
   };
-  const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 편집 비밀번호 <b>1234</b>, 보기 비밀번호 <b>0000</b>';
+  window.__store=store;   // 체험 모드 전용: 테스트에서 권한 확인용 (실제 Firebase 모드에는 없음)
+  const w=$('#warn');w.hidden=false;w.innerHTML='<b>체험 모드</b> · Firebase 설정 전이라 이 기기에만 저장돼요. 목자 <b>1234</b>, 보기 <b>0000</b>, 새가족팀 <b>5678</b>';
 }
 
 /* ---------- 구글 시트에 '업데이트해 줘' 신호 ----------
@@ -211,9 +259,15 @@ const pingSheet=()=>{if(!SHEET_SYNC_URL)return;clearTimeout(pingT);
 ['setGroup','delGroup','setAtt'].forEach(k=>{const f=store[k];store[k]=async(...a)=>{const r=await f(...a);pingSheet();return r}});
 
 /* ---------- 상태 ---------- */
-let groups=[],att={},loaded=false,role='',unG=null;
+let groups=[],att={},loaded=false,role='',unG=null,members=[],unM=null,welcome=null,unW=null;
 let view='dashboard',open=new Set(),gid=ls.get('gid')||'',draft=null,editing=false,unAtt=null;
 const pad=n=>String(n).padStart(2,'0');
+/* ---------- 연도: 해마다 목장·목원이 바뀌어요. 목장은 연도별로 따로 두고, 지난 연도 기록은 고칠 수 없어요 ---------- */
+const kNow=()=>new Date(Date.now()+9*3600e3);   // 한국 시간
+const thisYear=()=>kNow().getUTCFullYear();
+const yearOpen=y=>y>=thisYear()||(y===thisYear()-1&&kNow().getUTCMonth()===0);   // 1월 한 달은 작년 12월 기록을 고칠 수 있어요
+const gYear=g=>Number(g.year)||LEGACY_YEAR;
+const curYear=()=>Number(date.slice(0,4));
 const fmt=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const lastSunday=()=>{const d=new Date();d.setDate(d.getDate()-d.getDay());return fmt(d)};
 let date=lastSunday();$('#date').value=date;
@@ -224,7 +278,14 @@ function setDate(d){date=d;$('#date').value=d;draft=null;subAtt();render()}
 
 const parseMembers=t=>t.split(/\n/).map(s=>s.trim()).filter(Boolean).map(s=>({name:s.replace(/\*$/,'').trim(),isNew:/\*$/.test(s)}));
 const memberText=ms=>(ms||[]).map(m=>m.name+(m.isNew?'*':'')).join('\n');
-const sorted=()=>[...groups].sort((a,b)=>(a.order??99)-(b.order??99)||String(a.name).localeCompare(b.name,'ko',{numeric:true}));
+/* 목장 명단의 이름 ↔ 교인 명단 연결. 같은 이름이 여럿(동명이인)이면 목자가 골라요 */
+const active=()=>members.filter(m=>(m.status||'active')!=='left');
+const candidates=name=>active().filter(m=>m.name===name);
+const mLabel=m=>[m.birthYear?String(m.birthYear).slice(2)+'년생':'',m.hint||''].filter(Boolean).join(' · ');
+let linkSel={};   // 명단 수정 중 고른 연결: 이름 → 교인 id ('' = 모름)
+const resolveMid=(name,prev)=>{if(name in linkSel)return linkSel[name]||undefined;const c=candidates(name);
+  if(prev&&c.some(m=>m.id===prev))return prev;return c.length===1?c[0].id:undefined};
+const sorted=()=>groups.filter(g=>gYear(g)===curYear()).sort((a,b)=>(a.order??99)-(b.order??99)||String(a.name).localeCompare(b.name,'ko',{numeric:true}));
 const errMsg=e=>e?.code==='permission-denied'?'권한이 없어요. 다시 로그인해 주세요':'저장 실패: 인터넷 연결을 확인해 주세요';
 
 /* ---------- 대시보드 ---------- */
@@ -255,8 +316,10 @@ function renderDash(){
   const memos=gs.filter(g=>att[g.id]&&String(att[g.id].note||'').trim());
   $('#memos').innerHTML=memos.map(g=>`<div class="memo"><b>${esc(g.name)}</b><span class="note"> 목자 ${esc(g.leader||'-')}</span><p>${esc(att[g.id].note)}</p></div>`).join('')
     ||'<div class="empty">이번 주에 남긴 메모가 없어요.</div>';
-  $('#tTotal').innerHTML=`${P}<span> / ${T}명</span>`;
-  const r=T?Math.round(P/T*100):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`;$('#tMeter').style.width=r+'%';
+  // 큰 숫자 = 공식 출석: 목자 체크(O·△)와 새가족팀 체크 중 한 곳이라도 체크한 사람
+  const W=Object.keys(checked()).length,O=W?reconcile(gs,att,checked()).official:P;
+  $('#tTotal').innerHTML=`${O}<span> / ${T}명</span>`;
+  const r=T?Math.min(100,Math.round(O/T*100)):0;$('#tRate').textContent=`출석률 ${r}% · ${date.replace(/-/g,'.')} 주일`+(W?` · 목자 체크 ${P} · 새가족팀 체크 ${W}`:'');$('#tMeter').style.width=r+'%';
   $('#kSub').textContent=`${S} / ${gs.length}`;$('#kGroup').textContent=M+'명';$('#kNew').textContent=N+'명';$('#kGuest').textContent=G+'명';
   document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const id=b.dataset.open;open.has(id)?open.delete(id):open.add(id);renderDash()});
 }
@@ -278,15 +341,17 @@ function renderLogin(box){
 }
 function renderCheck(){
   const box=$('#checkBody');
-  if(role!=='edit'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">보기 전용으로 들어오셨어요</h2>
-    <p>출석 체크와 명단 수정은 <b>편집 비밀번호</b>로 들어와야 할 수 있어요. 목자라면 로그아웃한 뒤 편집 비밀번호로 다시 들어와 주세요.</p>
+  if(role!=='edit'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">${role==='nf'?'새가족팀으로 들어오셨어요':'보기 전용으로 들어오셨어요'}</h2>
+    <p>목장 출석 체크와 명단 수정은 <b>목자 비밀번호</b>로 들어와야 할 수 있어요.${role==='nf'?' 새가족 출석은 ‘새가족’ 탭에서 해 주세요.':' 목자라면 로그아웃한 뒤 목자 비밀번호로 다시 들어와 주세요.'}</p>
     <button class="btn ghost" id="lo2">로그아웃</button></div>`;$('#lo2').onclick=()=>store.logout();return}
-  const gs=sorted();
+  const gs=sorted(),locked=!yearOpen(curYear());
+  if(locked){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">${curYear()}년은 지난 연도예요</h2>
+    <p>지난 연도 출석과 명단은 기록을 지키기 위해 고칠 수 없어요. 대시보드에서 보기만 할 수 있어요.</p></div>`;return}
   if(!gs.length){
-    box.innerHTML=`<div class="empty"><p>아직 목장이 없어요.</p><div class="actions" style="justify-content:center">
+    box.innerHTML=`<div class="empty"><p>${curYear()}년 목장이 아직 없어요.</p><div class="actions" style="justify-content:center">
       <button class="btn" id="make13">목장 13개 한 번에 만들기</button></div>
-      <p class="note">‘1목장’~‘13목장’이 만들어져요. 이름·목자·명단은 각 목장에서 ‘명단 수정’으로 바꾸면 돼요.</p></div>`;
-    $('#make13').onclick=async e=>{e.target.disabled=true;try{for(let i=1;i<=13;i++){const id='g'+pad(i);await store.setGroup(id,{id,name:i+'목장',leader:'',members:[],order:i})}toast('목장 13개를 만들었어요')}catch(err){toast(errMsg(err));e.target.disabled=false}};
+      <p class="note">${curYear()}년 목장 ‘1목장’~‘13목장’이 만들어져요. 지난 연도 목장과 기록은 그대로 남아요. 이름·목자·명단은 각 목장에서 ‘명단 수정’으로 바꾸면 돼요.</p></div>`;
+    $('#make13').onclick=async e=>{e.target.disabled=true;try{const Y=curYear();for(let i=1;i<=13;i++){const id=Y+'_g'+pad(i);await store.setGroup(id,{id,year:Y,name:i+'목장',leader:'',members:[],order:i})}toast('목장 13개를 만들었어요')}catch(err){toast(errMsg(err));e.target.disabled=false}};
     return;
   }
   if(!gs.find(g=>g.id===gid))gid=gs[0].id;
@@ -298,10 +363,20 @@ function renderCheck(){
       <div class="grid2"><div class="field"><label for="en">목장 이름</label><input type="text" id="en" value="${esc(g.name)}"></div>
       <div class="field"><label for="el">목자</label><input type="text" id="el" value="${esc(g.leader||'')}"></div></div>
       <div class="field"><label for="em">명단 · 한 줄에 한 명, 새가족은 이름 뒤에 *</label><textarea id="em" placeholder="김하늘&#10;이소망&#10;박은혜*">${esc(memberText(ms))}</textarea></div>
+      <div class="links" id="links" aria-live="polite"></div>
       <div class="field" style="max-width:160px"><label for="eo">표시 순서</label><input type="number" id="eo" value="${g.order??''}"></div>
       <div class="actions"><button class="btn" id="eSave">저장</button><button class="btn ghost" id="eCancel">취소</button><button class="btn ghost" id="eDel">목장 삭제</button></div></div>`+foot;
+    const prevMid=Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]));
+    const drawLinks=()=>{const list=parseMembers($('#em').value);if(!members.length){$('#links').innerHTML='';return}
+      $('#links').innerHTML=`<p class="note" style="margin:0 0 6px">교인 명단과 연결 · 새가족팀 출석과 맞춰 보는 데 써요</p>`+list.map(m=>{const c=candidates(m.name),mid=resolveMid(m.name,prevMid[m.name]);
+        if(c.length>1)return `<div class="lk warn"><b>${esc(m.name)}</b> 동명이인 ${c.length}명 · <select data-lk="${esc(m.name)}" aria-label="${esc(m.name)} 누구인지 고르기"><option value="">누구인지 골라 주세요</option>${c.map(x=>`<option value="${esc(x.id)}" ${x.id===mid?'selected':''}>${esc(m.name)} (${esc(mLabel(x)||'정보 없음')})</option>`).join('')}</select></div>`;
+        if(c.length===1)return `<div class="lk ok">✓ ${esc(m.name)} <span class="note">${esc(mLabel(c[0]))}</span></div>`;
+        return `<div class="lk no">○ ${esc(m.name)} <span class="note">교인 명단에 없어요 · 새가족팀에 등록을 부탁해 주세요</span></div>`}).join('');
+      $('#links').querySelectorAll('[data-lk]').forEach(sel=>sel.onchange=()=>{linkSel[sel.dataset.lk]=sel.value})};
+    $('#em').addEventListener('input',drawLinks);drawLinks();
     $('#eSave').onclick=async()=>{const name=$('#en').value.trim();if(!name)return toast('목장 이름을 적어 주세요');
-      try{await store.setGroup(g.id,{...g,name,leader:$('#el').value.trim(),members:parseMembers($('#em').value),order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
+      const roster=parseMembers($('#em').value).map(m=>{const mid=resolveMid(m.name,prevMid[m.name]);return mid?{...m,mid}:m});
+      try{await store.setGroup(g.id,{...g,year:gYear(g),name,leader:$('#el').value.trim(),members:roster,order:Number($('#eo').value)||g.order||99});editing=false;draft=null;toast('저장했어요');render()}catch(e){toast(errMsg(e))}};
     $('#eCancel').onclick=()=>{editing=false;renderCheck()};
     const del=$('#eDel');del.onclick=async()=>{if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='정말 삭제할까요?';del.className='btn danger';return}
       try{await store.delGroup(g.id);editing=false;gid='';toast('삭제했어요')}catch(e){toast(errMsg(e))}};
@@ -319,7 +394,7 @@ function renderCheck(){
     <div class="field"><label for="guests">방문자 (처음 온 사람, 쉼표로 구분)</label><input type="text" id="guests" value="${esc(draft.guests)}" placeholder="예: 홍길동, 김철수"></div>
     <div class="field"><label for="memo">메모 (선택) · 대시보드 맨 아래에 목장별로 모여요</label><textarea id="memo" rows="3" placeholder="기도제목, 결석 사유 등">${esc(draft.note)}</textarea></div>
     <div class="sticky"><span id="cnt">${cntText()}</span><button class="btn" id="submit">${a?'다시 제출':'제출하기'}</button></div>`+foot;
-    $('#edit').onclick=()=>{editing=true;renderCheck()};
+    $('#edit').onclick=()=>{editing=true;linkSel={};renderCheck()};
     // 짧게 누르기: 결석↔O (△이면 결석으로), 꾹 누르기(0.5초): △
     box.querySelectorAll('.m').forEach(b=>{const n=b.dataset.n;let t=null,longDone=false;
       const cancel=()=>{clearTimeout(t);t=null};
@@ -334,50 +409,201 @@ function renderCheck(){
       const is=v=>m=>S(m.name)===v;
       const rec={date,gid:g.id,groupName:g.name,leader:g.leader||'',present:ms.filter(is('O')).map(m=>m.name),worship:ms.filter(is('W')).map(m=>m.name),absent:ms.filter(is('')).map(m=>m.name),
         newPresent:ms.filter(m=>m.isNew&&S(m.name)).map(m=>m.name),guests:draft.guests.split(/[,，\n]/).map(s=>s.trim()).filter(Boolean),
-        note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString()};
+        note:draft.note.trim(),by:g.leader||'',submittedAt:new Date().toISOString(),
+        ids:Object.fromEntries(ms.filter(m=>m.mid).map(m=>[m.name,m.mid]))};   // 이름 → 교인 id (대조용)
       try{await store.setAtt(`${date}_${g.id}`,rec);toast(`${g.name} ${rec.present.length+rec.worship.length}명 제출 완료`);draft=null;render()}
       catch(err){toast(errMsg(err));e.target.disabled=false}};
   }
   box.querySelectorAll('.gp').forEach(b=>b.onclick=()=>{gid=b.dataset.g;ls.set('gid',gid);draft=null;editing=false;renderCheck()});
-  $('#addG').onclick=async()=>{const id='g'+Date.now().toString(36),order=Math.max(0,...gs.map(x=>x.order||0))+1;
-    try{await store.setGroup(id,{id,name:'새 목장',leader:'',members:[],order});gid=id;editing=true;toast('목장을 추가했어요. 이름을 정해 주세요')}catch(e){toast(errMsg(e))}};
+  $('#addG').onclick=async()=>{const Y=curYear(),id=Y+'_g'+Date.now().toString(36),order=Math.max(0,...gs.map(x=>x.order||0))+1;
+    try{await store.setGroup(id,{id,year:Y,name:'새 목장',leader:'',members:[],order});gid=id;editing=true;toast('목장을 추가했어요. 이름을 정해 주세요')}catch(e){toast(errMsg(e))}};
   $('#logout').onclick=()=>store.logout();
 }
 
+/* ---------- 대조: 새가족팀 체크 ↔ 목자 체크 ----------
+   공식 출석 = 둘 중 한 곳이라도 체크한 사람(합집합). 사람 비교는 교인 id로 해요(동명이인 구분). */
+// reconcile(목장들, 목장 기록, 새가족팀 체크)는 report.js에 있어요 (앱·시트 스크립트가 같은 계산을 써요)
+function drawRecon(){const el=$('#wRecon');if(!el)return;
+  const R=reconcile(sorted(),att,checked()),chip=(x,c='')=>`<span class="chip ${c}">${esc(x.name)}${x.g?` <small>${esc(x.g.name)}</small>`:''}</span>`;
+  const sec=(title,list,c,help)=>list.length?`<h3>${title} ${list.length}명</h3>${help?`<p class="note">${help}</p>`:''}<div class="chips">${list.map(x=>chip(x,c)).join('')}</div>`:'';
+  const byG={};[...R.shepMiss,...R.nfMiss].forEach(x=>{byG[x.g.name]=(byG[x.g.name]||0)+1});
+  el.innerHTML=`<div class="tally recon"><div><div class="big">${R.official}<span>명</span></div><div class="note">공식 출석 · 한 곳이라도 체크한 사람</div></div>
+    <div class="kpis"><div class="kpi"><span>양쪽 일치</span><b>${R.both.length}명</b></div>
+    <div class="kpi"><span>목자 쪽 누락</span><b>${R.shepMiss.length}명</b></div>
+    <div class="kpi"><span>새가족팀 쪽 누락</span><b>${R.nfMiss.length}명</b></div>
+    <div class="kpi"><span>목장 없음</span><b>${R.noGroup.length}명</b></div></div></div>
+    ${Object.keys(byG).length?`<p class="note">불일치 목장: ${Object.entries(byG).map(([n,c])=>`${esc(n)} ${c}명`).join(' · ')}</p>`:''}
+    ${sec('목자 쪽 누락',R.shepMiss,'n','새가족팀은 출석으로 체크했는데 목자는 결석으로 냈어요.')}
+    ${sec('새가족팀 쪽 누락',R.nfMiss,'w','목자는 출석으로 냈는데 새가족팀 체크에는 없어요.')}
+    ${sec('목장 미제출',R.notSubmitted,'','소속 목장이 아직 출석을 내지 않았어요.')}
+    ${sec('목장 없음 · 배정 필요',R.noGroup,'','올해 어느 목장 명단에도 없어요.')}
+    ${sec('교인 명단과 연결 안 됨',R.unlinked,'','목장 명단의 이름이 교인 명단과 연결되지 않아 비교할 수 없어요. 목자에게 명단 수정을 부탁해 주세요.')}
+    ${!R.shepMiss.length&&!R.nfMiss.length&&!R.noGroup.length&&!R.notSubmitted.length&&!R.unlinked.length?'<div class="empty">불일치가 없어요.</div>':''}`;
+}
+
+/* ---------- 새가족팀: 이름 검색 출석, 연락처, 새가족 등록 ---------- */
+let wq='',wOpen='',wReg=false;const cCache={};
+const memberIdFor=(name,birth)=>'m_'+birth.replace(/-/g,'')+'_'+name.replace(/[\/\s]+/g,'');   // 시트 가져오기와 같은 규칙
+const fmtPhone=v=>{let d=String(v||'').replace(/\D/g,'');if(d.length===10&&d[0]==='1')d='0'+d;
+  return d.length===11?d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7):d.length===10?d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6):''};
+const checked=()=>welcome?.checked||{};
+function renderWelcome(){
+  const box=$('#welcomeBody');
+  if(role!=='nf'){box.innerHTML=`<div class="panel"><h2 style="margin-top:0">새가족팀 전용이에요</h2><p>새가족팀 비밀번호로 들어와야 볼 수 있어요.</p></div>`;return}
+  if(typing('#v-welcome')&&box.querySelector('#ws')){drawWResults();drawWChecked();drawRecon();return}
+  const open=yearOpen(curYear()),n=Object.keys(checked()).length;
+  box.innerHTML=`<div class="ghead"><h2>새가족팀 출석 <span class="note">${date.replace(/-/g,'.')} 주일 · <b id="wN">${n}</b>명</span></h2>
+    ${open?'<button class="btn sm" id="wRegBtn">+ 새가족 등록</button>':''}</div>
+    ${open?'':'<p class="note">지난 연도 기록은 고칠 수 없어요. 보기만 할 수 있어요.</p>'}
+    <div id="wRegBox"></div>
+    <div class="field"><label for="ws">이름 검색</label><input type="search" id="ws" placeholder="이름 두세 글자" autocomplete="off" value="${esc(wq)}"></div>
+    <div id="wRes" class="wlist"></div>
+    <h3>오늘 출석 체크한 사람</h3><div id="wChk" class="wlist"></div>
+    <div id="wCard"></div>
+    <h2>대조 · 새가족팀 체크 ↔ 목자 체크</h2><div id="wRecon"></div>`;
+  $('#ws').oninput=e=>{wq=e.target.value;drawWResults()};
+  if(open)$('#wRegBtn').onclick=()=>{wReg=!wReg;drawWReg()};
+  drawWReg();drawWResults();drawWChecked();drawWCard();drawRecon();
+}
+const wRow=(m,on)=>`<div class="wr"><button class="wname" data-card="${esc(m.id)}"><b>${esc(m.name)}</b> <span class="note">${esc(mLabel(m))}${(m.status||'active')!=='active'?' · '+({break:'쉬는 중',left:'떠남'}[m.status]):''}</span></button>
+  ${yearOpen(curYear())?`<button class="btn sm ${on?'ghost':''}" data-chk="${esc(m.id)}" aria-pressed="${on}">${on?'✓ 출석 취소':'출석'}</button>`:on?'<span class="badge ok">출석</span>':''}</div>`;
+function bindW(el){
+  el.querySelectorAll('[data-chk]').forEach(b=>b.onclick=async()=>{const id=b.dataset.chk,m=members.find(x=>x.id===id),on=!!checked()[id];b.disabled=true;
+    try{on?await store.checkOut(date,id):await store.checkIn(date,id,m?.name||'');toast(on?`${m?.name} 출석 취소`:`${m?.name} 출석`)}catch(e){toast(errMsg(e));b.disabled=false}});
+  el.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>{wOpen=wOpen===b.dataset.card?'':b.dataset.card;drawWCard()});
+}
+function drawWResults(){const el=$('#wRes');if(!el)return;const q=wq.trim();
+  if(!q){el.innerHTML='';return}
+  const hit=members.filter(m=>m.name.includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'ko')).slice(0,30);
+  el.innerHTML=hit.map(m=>wRow(m,!!checked()[m.id])).join('')||`<div class="empty">‘${esc(q)}’ 이름이 명단에 없어요. 처음 온 사람이면 ‘새가족 등록’을 눌러 주세요.</div>`;bindW(el)}
+function drawWChecked(){const el=$('#wChk');if(!el)return;const c=checked();
+  const list=Object.entries(c).map(([id,v])=>members.find(m=>m.id===id)||{id,name:v.name}).sort((a,b)=>String(c[a.id].at).localeCompare(String(c[b.id].at)));
+  $('#wN')&&($('#wN').textContent=list.length);
+  el.innerHTML=list.map(m=>wRow(m,true)).join('')||'<div class="empty">아직 체크한 사람이 없어요.</div>';bindW(el)}
+async function drawWCard(){const el=$('#wCard');if(!el)return;const id=wOpen;if(!id){el.innerHTML='';return}
+  const m=members.find(x=>x.id===id);if(!m){el.innerHTML='';return}
+  el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처"><p class="note">연락처 불러오는 중…</p></div>`;
+  let c=cCache[id];if(!c){try{c=cCache[id]=(await store.getContact(id))||{}}catch(e){el.innerHTML=`<div class="panel card"><p>${esc(errMsg(e))}</p></div>`;return}}
+  if(wOpen!==id)return;
+  const tel=String(c.phone||'').replace(/[^0-9+]/g,'');
+  el.innerHTML=`<div class="panel card" role="dialog" aria-label="${esc(m.name)} 연락처">
+    <div class="ghead"><h3 style="margin:0">${esc(m.name)} <span class="note">${esc(mLabel(m))}</span></h3><button class="btn ghost sm" id="cClose" aria-label="닫기">닫기</button></div>
+    <dl class="kv"><dt>전화</dt><dd>${c.phone?`<a href="tel:${esc(tel)}" class="tel">${esc(c.phone)}</a>`:'<span class="note">없음</span>'}</dd>
+    <dt>주소</dt><dd>${esc(c.address||'')||'<span class="note">없음</span>'}</dd>
+    <dt>생일</dt><dd>${esc(c.birth||'')||'<span class="note">없음</span>'}</dd>
+    ${m.firstVisit?`<dt>처음 온 날</dt><dd>${esc(m.firstVisit)}</dd>`:''}${m.registeredAt?`<dt>등록일</dt><dd>${esc(m.registeredAt)}</dd>`:''}
+    ${c.memo?`<dt>메모</dt><dd>${esc(c.memo)}</dd>`:''}</dl>
+    <details><summary>연락처 고치기</summary>
+      <div class="field"><label for="cPhone">전화번호 (필수)</label><input id="cPhone" inputmode="tel" value="${esc(c.phone||'')}"></div>
+      <div class="field"><label for="cAddr">주소</label><input id="cAddr" value="${esc(c.address||'')}"></div>
+      <div class="field"><label for="cMemo">메모</label><textarea id="cMemo" rows="2">${esc(c.memo||'')}</textarea></div>
+      <div class="field"><label for="cStatus">상태</label><select id="cStatus">${[['active','출석 중'],['break','쉬는 중'],['left','떠남']].map(([v,t])=>`<option value="${v}" ${(m.status||'active')===v?'selected':''}>${t}</option>`).join('')}</select></div>
+      <div class="actions"><button class="btn sm" id="cSave">저장</button><span class="note" id="cMsg"></span></div></details></div>`;
+  $('#cClose').onclick=()=>{wOpen='';drawWCard()};
+  $('#cSave').onclick=async()=>{const phone=fmtPhone($('#cPhone').value);if(!phone){$('#cMsg').textContent='전화번호를 확인해 주세요';return}
+    const nc={phone,address:$('#cAddr').value.trim(),birth:c.birth||'',memo:$('#cMemo').value.trim()};
+    const {id:_,...mm}=m;
+    try{await store.setContact(id,nc);if((m.status||'active')!==$('#cStatus').value)await store.setMember(id,{...mm,status:$('#cStatus').value});cCache[id]=nc;toast('저장했어요');drawWCard()}catch(e){$('#cMsg').textContent=errMsg(e)}};
+}
+function drawWReg(){const el=$('#wRegBox');if(!el)return;if(!wReg){el.innerHTML='';return}
+  el.innerHTML=`<div class="panel"><h3 style="margin-top:0">새가족 등록</h3>
+    <div class="grid2"><div class="field"><label for="rName">이름 (필수)</label><input id="rName" autocomplete="off"></div>
+    <div class="field"><label for="rBirth">생년월일 (필수)</label><input type="date" id="rBirth" min="1950-01-01" max="${fmt(new Date())}"></div></div>
+    <div class="grid2"><div class="field"><label for="rPhone">전화번호 (필수)</label><input id="rPhone" inputmode="tel" placeholder="010-0000-0000"></div>
+    <div class="field"><label for="rFirst">처음 온 날</label><input type="date" id="rFirst" value="${date}"></div></div>
+    <div class="field"><label for="rAddr">주소</label><input id="rAddr"></div>
+    <div class="field"><label for="rMemo">메모 (선택)</label><textarea id="rMemo" rows="2" placeholder="인도자, 관심사 등"></textarea></div>
+    <label class="note"><input type="checkbox" id="rChk" checked> 오늘 출석도 함께 체크</label>
+    <div class="actions"><button class="btn" id="rSave">등록</button><button class="btn ghost" id="rCancel">취소</button><span class="note" id="rMsg"></span></div></div>`;
+  $('#rCancel').onclick=()=>{wReg=false;drawWReg()};
+  $('#rSave').onclick=async e=>{const name=$('#rName').value.trim(),birth=$('#rBirth').value,phone=fmtPhone($('#rPhone').value),msg=$('#rMsg');
+    if(!name)return msg.textContent='이름을 적어 주세요';if(!birth)return msg.textContent='생년월일을 넣어 주세요';if(!phone)return msg.textContent='전화번호를 확인해 주세요 (숫자 10~11자리)';
+    const id=memberIdFor(name,birth);
+    if(members.some(m=>m.id===id)){msg.textContent='이미 등록된 사람이에요. 이름으로 검색해 주세요';wq=name;drawWResults();return}
+    e.target.disabled=true;
+    const first=$('#rFirst').value||date;
+    try{await store.addMember(id,{name,birthYear:Number(birth.slice(0,4)),hint:'새가족',status:'active',registeredAt:fmt(new Date()),firstVisit:first,isNew:true},
+        {phone,address:$('#rAddr').value.trim(),birth,memo:$('#rMemo').value.trim()});
+      if($('#rChk').checked)await store.checkIn(date,id,name);
+      toast(`${name} 님을 등록했어요`);wReg=false;wq='';renderWelcome()}
+    catch(err){msg.textContent=err?.code==='already-exists'?'이미 등록된 사람이에요':errMsg(err);e.target.disabled=false}};
+}
+
+/* ---------- 분기 보고 (계산은 report.js의 quarterStats) ---------- */
+let repQ='',repData={},repBusy='';
+async function loadQuarter(q){const pq=prevQuarter(q),from=quarterRange(pq).from,to=quarterRange(q).to;
+  const [recs,wels]=await Promise.all([store.rangeDocs('attendance',from,to),store.rangeDocs('welcome',from,to)]);
+  repData[q]={recs,wels,at:Date.now()}}
+function renderReport(){
+  const box=$('#reportBody');if(!repQ)repQ=quarterOf(fmt(new Date()));
+  const q=repQ,d=repData[q];
+  const nav=`<div class="ghead"><h2>분기 보고</h2><div class="qnav"><button class="btn ghost sm" id="qPrev" aria-label="이전 분기">◀</button>
+    <b id="qLabel">${esc(quarterLabel(q))}</b><button class="btn ghost sm" id="qNext" aria-label="다음 분기" ${q>=quarterOf(fmt(new Date()))?'disabled':''}>▶</button></div></div>`;
+  const bind=()=>{$('#qPrev').onclick=()=>{repQ=prevQuarter(repQ);renderReport()};
+    $('#qNext').onclick=()=>{const [y,n]=[Number(repQ.slice(0,4)),Number(repQ.slice(-1))];repQ=n===4?(y+1)+'-Q1':y+'-Q'+(n+1);renderReport()};
+    const r=$('#rRefresh');if(r)r.onclick=()=>{delete repData[q];renderReport()}};
+  if(!d||Date.now()-d.at>5*60e3){box.innerHTML=nav+'<div class="empty">불러오는 중…</div>';bind();
+    if(repBusy!==q){repBusy=q;loadQuarter(q).then(()=>{repBusy='';if(view==='report'&&repQ===q)renderReport()}).catch(e=>{repBusy='';box.querySelector('.empty').textContent=errMsg(e)})}return}
+  const S=quarterStats(q,groups,d.recs,d.wels,members),P=quarterStats(prevQuarter(q),groups,d.recs,d.wels,members);
+  const delta=(a,b)=>{if(!P.sundays)return '<span class="note">지난 분기 기록 없음</span>';const x=Math.round((a-b)*10)/10;return x===0?'<span class="note">지난 분기와 같음</span>':`<span class="${x>0?'up':'down'}">${x>0?'▲':'▼'} ${Math.abs(x)}명</span> <span class="note">지난 분기 대비</span>`};
+  const md=x=>Number(x.slice(5,7))+'/'+Number(x.slice(8,10));
+  const card=(t,v,sub)=>`<div class="rcard"><span>${t}</span><b>${v}<small>명</small></b><div>${sub}</div></div>`;
+  const W=S.weekly,maxY=Math.max(10,...W.map(w=>w.official)),wd=320,ht=150,px=i=>W.length<2?wd/2:16+i*(wd-32)/(W.length-1),py=v=>ht-14-v/maxY*(ht-34);
+  const line=k=>W.map((w,i)=>`${i?'L':'M'}${px(i).toFixed(1)},${py(w[k]).toFixed(1)}`).join('');
+  const chart=W.length?`<svg viewBox="0 0 ${wd} ${ht}" class="rchart" role="img" aria-label="주별 출석 추이: ${W.map(w=>md(w.date)+' '+w.official+'명').join(', ')}">
+    ${[0,.5,1].map(f=>`<line x1="10" x2="${wd-6}" y1="${py(maxY*f)}" y2="${py(maxY*f)}" class="gl"/><text x="2" y="${py(maxY*f)-3}" class="ax">${Math.round(maxY*f)}</text>`).join('')}
+    <path d="${line('official')}" class="l1"/><path d="${line('group')}" class="l2"/>
+    ${W.map((w,i)=>`<circle cx="${px(i)}" cy="${py(w.official)}" r="3" class="p1"><title>${md(w.date)} 공식 ${w.official}명 · 목장모임 ${w.group}명</title></circle><text x="${px(i)}" y="${ht-1}" class="ax" text-anchor="middle">${md(w.date)}</text>`).join('')}</svg>
+    <div class="legend"><span><i class="k1"></i>예배 출석(공식)</span><span><i class="k2"></i>목장모임</span></div>`:'';
+  const rates=S.groupRates.filter(g=>g.rate!=null).sort((a,b)=>b.rate-a.rate);
+  box.innerHTML=nav+(S.sundays?`<p class="note">${md(S.weekly[0].date)} ~ ${md(S.weekly[S.weekly.length-1].date)} · 주일 ${S.sundays}회 · 목장 명단 ${S.roster}명
+      ${role==='nf'&&SHEET_URL?` · <a href="${esc(SHEET_URL)}" target="_blank" rel="noopener">구글 시트로 보기</a>`:''} · <button class="linkbtn" id="rRefresh">새로고침</button></p>
+    <div class="rcards">${card('평균 예배 출석',S.avgOfficial,delta(S.avgOfficial,P.avgOfficial))}${card('평균 목장모임',S.avgGroup,delta(S.avgGroup,P.avgGroup))}
+      ${card('새가족 등록',S.newcomers,`<span class="note">그중 3회 이상 출석 ${S.settled}명</span>`)}${card('방문자',S.guests,`<span class="note">주일 평균 ${S.avgGuests}명</span>`)}</div>
+    <h3>주별 출석 추이</h3>${chart}
+    <h3>목장별 평균 출석률</h3><div class="rbars">${rates.map(g=>`<div class="rb"><span>${esc(g.name)}</span><span class="track"><i class="${g.rate<60?'low':''}" style="width:${g.rate}%"></i></span><b>${g.rate}%</b></div>`).join('')||'<div class="empty">목장 출석 기록이 없어요.</div>'}</div>
+    <p class="note">출석률 = 제출한 주의 (O+△) ÷ 명단 인원 · <span class="lowtxt">빨간색</span>은 60% 미만</p>
+    <details class="absent4"><summary>4주 연속 결석 <b>${S.absent4.length}명</b></summary><div class="chips">${S.absent4.map(a=>`<span class="chip">${esc(a.name)} <small>${esc(a.group)}</small></span>`).join('')||'<span class="note">없어요</span>'}</div></details>`
+    :'<div class="empty">이 분기에는 출석 기록이 없어요.</div>');
+  bind();
+}
+
 /* ---------- 화면 전환 ---------- */
-const typing=()=>{const f=document.activeElement;return f&&f.closest&&f.closest('#v-check')&&f.matches('input,textarea')};
+const typing=(sel='#v-check')=>{const f=document.activeElement;return f&&f.closest&&f.closest(sel)&&f.matches('input,textarea,select')};
 function render(){
   const out=!role;
   $('.date').hidden=out;$('.tabs').hidden=out;$('#v-login').hidden=!out;
-  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';
+  $('#v-dashboard').hidden=out||view!=='dashboard';$('#v-check').hidden=out||view!=='check';$('#v-welcome').hidden=out||view!=='welcome';$('#v-report').hidden=out||view!=='report';
+  $('#tabWelcome').hidden=role!=='nf';
   if(out){if(!$('#loginBody').innerHTML)renderLogin($('#loginBody'));return}
   document.querySelectorAll('.tabs a').forEach(a=>{if(a.dataset.v===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  if(view==='dashboard')renderDash();else if(!typing())renderCheck();
+  if(view==='dashboard')renderDash();else if(view==='welcome')renderWelcome();else if(view==='report')renderReport();else if(!typing())renderCheck();
   sheetBtn();
 }
-/* 구글 시트 버튼: 편집 권한일 때만 링크를 걸고, 보기 권한이면 안내만 띄워요 */
-function sheetBtn(){const a=$('#sheetLink');if(!SHEET_URL)return;a.hidden=false;
-  if(role==='edit')a.href=SHEET_URL;else a.removeAttribute('href');
-  a.setAttribute('role','button');a.tabIndex=0}
-const route=()=>{view=location.hash==='#check'?'check':'dashboard';render()};
+/* 구글 시트 버튼: 새가족팀만 보여요. 다른 권한은 버튼도, 링크 주소도 없어요 */
+function sheetBtn(){const a=$('#sheetLink');const ok=!!SHEET_URL&&role==='nf';a.hidden=!ok;
+  if(ok)a.href=SHEET_URL;else a.removeAttribute('href')}
+const route=()=>{view={'#check':'check','#welcome':'welcome','#report':'report'}[location.hash]||'dashboard';render()};
 addEventListener('hashchange',route);
 
 /* ---------- 데이터 연결 ---------- */
 const netWarn=t=>{const w=$('#warn');if(DEMO)return;if(t){w.hidden=false;w.textContent=t}else if(w.dataset.net){w.hidden=true}w.dataset.net=t?'1':''};
-function subAtt(){unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>netWarn('연결이 끊겼어요. 새로고침해 주세요.'))}
+function subWelcome(){unW&&unW();unW=null;welcome=null;if(!role)return;unW=store.onWelcome(date,w=>{welcome=w;render()},()=>{})}
+function subAtt(){subWelcome();unAtt&&unAtt();unAtt=null;att={};if(!role)return;unAtt=store.onAtt(date,list=>{att={};list.forEach(x=>att[x.gid]=x);render()},()=>netWarn('연결이 끊겼어요. 새로고침해 주세요.'))}
 let timer=null;
 function subAll(){
   unG&&unG();unG=null;groups=[];loaded=false;clearTimeout(timer);
+  unM&&unM();unM=null;members=[];
   if(!role){subAtt();return}
   timer=setTimeout(()=>{if(!loaded)netWarn('데이터를 불러오지 못하고 있어요. 인터넷 연결을 확인해 주세요.')},10000);
   unG=store.onGroups((list,cache)=>{clearTimeout(timer);loaded=true;groups=list;if(!cache)netWarn('');render()},
     ()=>{clearTimeout(timer);loaded=true;netWarn('연결이 끊겼어요. 새로고침해 주세요.');render()});
   subAtt();
+  unM&&unM();unM=store.onMembers(list=>{members=list;render()},()=>{});
 }
 store.onAuth(r=>{if(r===role&&unG)return;role=r;editing=false;draft=null;if(!r)$('#loginBody').innerHTML='';subAll();render()});
 $('#logoutD').onclick=()=>store.logout();
-$('#sheetLink').onclick=e=>{if(role!=='edit'){e.preventDefault();toast('뷰어 기능에선 지원하지 않는 기능입니다.',3000)}};
-$('#sheetLink').onkeydown=e=>{if(e.key==='Enter'&&role!=='edit')$('#sheetLink').click()};
+$('#sheetLink').onclick=e=>{if(role!=='nf'){e.preventDefault();toast('새가족팀만 쓸 수 있는 기능이에요',3000)}};
 route();
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>

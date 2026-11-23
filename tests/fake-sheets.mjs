@@ -55,11 +55,13 @@ function makeRange(sh, r, c, nr, nc) {
   return chain(rg);
 }
 
-export function makeSpreadsheet(existingSheetNames = []) {
+export function makeSpreadsheet(existingSheetNames = [], sheetValues = {}) {
+  const withData = (n) => { const sh = makeSheet(n); sh.getDataRange = () => ({ getValues: () => sheetValues[n] || [] }); return sh; };
   const ss = {
-    sheets: existingSheetNames.map(makeSheet),
+    sheets: existingSheetNames.map(withData),
     active: null,
     getSheetByName: (n) => ss.sheets.find(s => s.name === n) || null,
+    getSheets: () => ss.sheets.slice(),
     insertSheet: (n) => { const s = makeSheet(n); ss.sheets.push(s); return s; },
     setActiveSheet: (s) => { ss.active = s; return s; },
     moveActiveSheet: (pos) => { ss.sheets = ss.sheets.filter(s => s !== ss.active); ss.sheets.splice(pos - 1, 0, ss.active); },
@@ -79,23 +81,34 @@ function toFs(v) {
 }
 
 // Apps Script 전역 객체들(SpreadsheetApp, UrlFetchApp 등)을 가짜로 만들어요
-export function makeAppsScriptGlobals({ ss, groups, records, now = '2026-11-23' }) {
-  const doc = (col) => (o) => ({ name: `projects/x/databases/(default)/documents/${col}/${o.id || (o.date + '_' + o.gid)}`, fields: Object.fromEntries(Object.entries(o).map(([k, x]) => [k, toFs(x)])) });
-  return {
+export function makeAppsScriptGlobals({ ss, groups = [], records = [], collections = {}, now = '2026-11-23', oauth = true, password = true }) {
+  const id = (o) => o.id || (o.date + '_' + o.gid);
+  const doc = (col) => (o) => ({ name: `projects/x/databases/(default)/documents/${col}/${id(o)}`, fields: Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'id' || col === 'groups').map(([k, x]) => [k, toFs(x)])) });
+  const data = { groups, attendance: records, members: [], contacts: [], welcome: [], ...collections };
+  const calls = [];   // 테스트에서 어떤 요청을 보냈는지 확인용
+  const g = {
+    calls, commits: [],
     SpreadsheetApp: {
       getActive: () => ss,
       newConditionalFormatRule: () => chain({ build: () => ({}) }),
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperties: () => ({ FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperties: () => (password
+      ? { FIREBASE_API_KEY: 'fake', FIREBASE_PROJECT_ID: 'fake', VIEWER_EMAIL: 'viewer@fake', VIEWER_PASSWORD: 'fake-pw' }
+      : { FIREBASE_PROJECT_ID: 'fake' }) }) },
+    ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null) },
     UrlFetchApp: {
-      fetch(url) {
-        const body = url.includes('signInWithPassword') ? { idToken: 'fake-token' }
-          : url.includes('/documents/groups') ? { documents: groups.map(doc('groups')) }
-          : { documents: records.map(doc('attendance')) };
-        return { getResponseCode: () => 200, getContentText: () => JSON.stringify(body) };
+      fetch(url, opt = {}) {
+        calls.push({ url, auth: opt.headers && opt.headers.Authorization, method: opt.method || 'get' });
+        const ok = (body) => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify(body) });
+        if (url.includes('signInWithPassword')) return password ? ok({ idToken: 'fake-token' }) : { getResponseCode: () => 400, getContentText: () => '{}' };
+        if (opt.headers && opt.headers.Authorization === 'Bearer fake-oauth' && !oauth) return { getResponseCode: () => 403, getContentText: () => '{}' };
+        if (url.includes(':commit')) { const b = JSON.parse(opt.payload); g.commits.push(b); return ok({ writeResults: b.writes.map(() => ({})) }); }
+        const col = (url.match(/documents\/([a-z]+)/) || [])[1];
+        return ok({ documents: (data[col] || []).map(doc(col)) });
       },
     },
-    Utilities: { formatDate: (_d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : '11/23 02:00') },
-    console: { error() {} },
+    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : '11/23 02:00') },
+    console: { error() {}, log() {} },
   };
+  return g;
 }
