@@ -73,13 +73,14 @@ function updateAttendanceSheet() {
     listDocs_(p, token, 'contacts').forEach(function (c) { contacts[c.id] = c; });
     var nf = writeNewcomerSheet_(buildNewcomerRows(members, contacts, records, welcomes));
     ss.setActiveSheet(nf); ss.moveActiveSheet(2); front = 2;
-    notifyNewcomers_(p, members);
+    syncNotifyConfig_(p, token);   // 새가족 알림은 앱(새가족팀 휴대폰)이 보내요. 채널 이름만 Firebase에 넣어 둬요
   }
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
     // 목장은 해마다 새로 짜요. 그 해 목장만 쓰고, 다른 해 목장 이름은 기록에 남은 이름 그대로 둬요
     var yearGroups = groups.filter(function (g) { return groupYear(g) === y; });
-    var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
+    var yearWelcomes = welcomes.filter(function (w) { return String(w.date || '').slice(0, 4) === String(y); });
+    var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석', yearWelcomes, members), sheetNameForYear(y));
     ss.setActiveSheet(sh); ss.moveActiveSheet(Math.min(i + 1 + front, ss.getSheets().length));   // 분기별통계·새가족 다음, 최신 연도부터
   });
 }
@@ -307,7 +308,12 @@ function sundaysOfMonth_(ym) {
   return out;
 }
 
-function buildGrid(groups, records, title) {
+// welcomes(선택): 새가족팀·출결버스 출석 체크, members(선택): 교인 명단 → '출'(현장 출석) 표시와 목장 미배정 출석자 줄
+function buildGrid(groups, records, title, welcomes, members) {
+  welcomes = welcomes || [];
+  var uniq = members ? uniqueNames(members) : {};
+  var welBy = {};
+  welcomes.forEach(function (w) { if (w.date && Object.keys(w.checked || {}).length) welBy[w.date] = w.checked; });
   var sorted = groups.slice().sort(function (a, b) {
     var oa = a.order == null ? 99 : a.order, ob = b.order == null ? 99 : b.order;
     return oa - ob || String(a.name).localeCompare(String(b.name), 'ko', { numeric: true });
@@ -320,9 +326,13 @@ function buildGrid(groups, records, title) {
     byKey[r.date + '|' + r.gid] = r;
     if (r.date > lastDate) lastDate = r.date;
   });
+  Object.keys(welBy).forEach(function (d) { if (d > lastDate) lastDate = d; });
 
   // 행: 목장 순서대로 현재 명단 + (명단에서 빠졌지만 기록에 있는 사람)
   var rows = [], seenGroup = {};
+  var midOf = {};   // '목장id|이름' → 교인 id (목장 명단 연결 → 출석 기록 → 교인 명단에 하나뿐인 이름 순)
+  groups.forEach(function (g) { (g.members || []).forEach(function (m) { if (m.mid) midOf[g.id + '|' + m.name] = m.mid; }); });
+  records.forEach(function (r) { Object.keys(r.ids || {}).forEach(function (n) { if (!midOf[r.gid + '|' + n]) midOf[r.gid + '|' + n] = r.ids[n]; }); });
   function addGroup(gid, name, roster) {
     seenGroup[gid] = true;
     var names = roster.slice(), have = {};
@@ -333,7 +343,7 @@ function buildGrid(groups, records, title) {
         if (!have[n]) { have[n] = true; names.push(n); }
       });
     });
-    names.forEach(function (n) { rows.push({ gid: gid, group: name, name: n }); });
+    names.forEach(function (n) { rows.push({ gid: gid, group: name, name: n, mid: midOf[gid + '|' + n] || uniq[n] || '' }); });
   }
   sorted.forEach(function (g) {
     addGroup(g.id, g.name, (g.members || []).map(function (m) { return m.name; }));
@@ -342,14 +352,28 @@ function buildGrid(groups, records, title) {
   records.forEach(function (r) {
     if (r.gid && !seenGroup[r.gid]) addGroup(r.gid, r.groupName || '이름 없는 목장', []);
   });
+  // 현장 출석(새가족팀·출결버스)은 했는데 어느 목장 줄에도 없는 사람 → '목장 미배정' 줄로
+  var rowMid = {};
+  rows.forEach(function (row) { if (row.mid) rowMid[row.mid] = true; });
+  var extra = {}, extraOrder = [];
+  Object.keys(welBy).sort().forEach(function (d) {
+    Object.keys(welBy[d]).forEach(function (id) {
+      if (rowMid[id] || extra[id]) return;
+      extra[id] = welBy[d][id].name || id; extraOrder.push(id);
+    });
+  });
+  extraOrder.sort(function (a, b) { return String(extra[a]).localeCompare(String(extra[b]), 'ko'); })
+    .forEach(function (id) { rows.push({ gid: '_none', group: '목장 미배정', name: extra[id], mid: id }); });
 
   // 열: 기록이 있는 달마다 그 달의 주일 + (주일이 아닌 날 기록), 마지막 기록 날짜까지
   var months = {};
   records.forEach(function (r) { if (r.date) months[r.date.slice(0, 7)] = true; });
+  Object.keys(welBy).forEach(function (d) { months[d.slice(0, 7)] = true; });
   var blocks = Object.keys(months).sort().map(function (ym) {
     var dates = {};
     sundaysOfMonth_(ym).forEach(function (d) { if (d <= lastDate) dates[d] = true; });
     records.forEach(function (r) { if (r.date && r.date.slice(0, 7) === ym) dates[r.date] = true; });
+    Object.keys(welBy).forEach(function (d) { if (d.slice(0, 7) === ym) dates[d] = true; });
     return { ym: ym, dates: Object.keys(dates).sort() };
   });
 
@@ -364,33 +388,45 @@ function buildGrid(groups, records, title) {
     header1[b.col] = b.ym.slice(0, 4) + '년 ' + Number(b.ym.slice(5, 7)) + '월';
     b.dates.forEach(function (d, j) {
       header2[b.col + j] = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10));
-      // 총 참석 = 그날 제출된 모든 목장의 O + △ (방문자는 빼고, 대시보드 숫자와 같아요)
-      // 방문자 수 = 그날 모든 목장이 적은 방문자 이름 수의 합계
-      var total = 0, guests = 0, any = false;
+      // 방문자 수 = 그날 모든 목장이 적은 방문자 이름 수의 합계 (총 참석은 아래에서 표를 다 채운 뒤 세요)
+      var guests = 0, any = !!welBy[d];
       records.forEach(function (r) {
         if (r.date !== d) return;
-        any = true; total += (r.present || []).length + (r.worship || []).length;
-        guests += (r.guests || []).length;
+        any = true; guests += (r.guests || []).length;
       });
-      header3[b.col + j] = any ? total : '';
       header4[b.col + j] = any ? guests : '';
     });
   });
 
   var values = [header1, header2, header3, header4];
+  var hasData = {};
+  blocks.forEach(function (b) { b.dates.forEach(function (d) { if (welBy[d]) hasData[d] = true; }); });
+  records.forEach(function (r) { if (r.date) hasData[r.date] = true; });
   rows.forEach(function (row) {
     var line = new Array(width).fill('');
     line[0] = row.group; line[1] = row.name;
     blocks.forEach(function (b) {
       b.dates.forEach(function (d, j) {
-        var r = byKey[d + '|' + row.gid];
-        if (!r) return;
-        if ((r.present || []).indexOf(row.name) >= 0) line[b.col + j] = 'O';
-        else if ((r.worship || []).indexOf(row.name) >= 0) line[b.col + j] = '△';
-        else if ((r.absent || []).indexOf(row.name) >= 0) line[b.col + j] = 'X';
+        // O·△는 목자 체크 그대로. 목자가 X거나 기록이 없어도 현장 출석(새가족팀·출결버스)이 있으면 '출'
+        var r = byKey[d + '|' + row.gid], here = !!(row.mid && welBy[d] && welBy[d][row.mid]), v = '';
+        if (r && (r.present || []).indexOf(row.name) >= 0) v = 'O';
+        else if (r && (r.worship || []).indexOf(row.name) >= 0) v = '△';
+        else if (here) v = '출';
+        else if (r && (r.absent || []).indexOf(row.name) >= 0) v = 'X';
+        line[b.col + j] = v;
       });
     });
     values.push(line);
+  });
+
+  // 총 참석 = 그날 O·△·출로 표시된 사람 수 (목자 체크와 현장 출석 중 한 곳이라도 = 공식 출석)
+  blocks.forEach(function (b) {
+    b.dates.forEach(function (d, j) {
+      var c = b.col + j, n = 0;
+      if (!hasData[d]) return;
+      values.slice(HEADER_ROWS).forEach(function (line) { if (line[c] === 'O' || line[c] === '△' || line[c] === '출') n++; });
+      header3[c] = n;
+    });
   });
 
   // 같은 목장이 이어지는 행 묶음 (A열 병합용). start는 values 안의 행 번호(0부터)
@@ -423,6 +459,7 @@ function writeSheet_(grid, sheetName) {
 
   sh.getRange(1, 2).setValue('업데이트 ' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'M/d HH:mm')).setFontColor('#5b6b62');
   sh.getRange(1, 1).setFontWeight('bold');
+  if (sh.getMaxColumns() >= cols) sh.getRange(2, 1).setNote('O 목장모임까지 · △ 예배만 · 출 현장 출석(새가족팀·출결버스) · X 결석');
   grid.months.forEach(function (m) {
     var r = sh.getRange(1, m.col + 1, 1, m.span);
     if (m.span > 1) r.merge();
@@ -448,7 +485,7 @@ function writeSheet_(grid, sheetName) {
     var rule = function (text, bg, fg) {
       return SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(bg).setFontColor(fg).setRanges([data]).build();
     };
-    sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('X', '#fbe3dc', '#b3402a')]);
+    sh.setConditionalFormatRules([rule('O', '#cfe6d6', '#1f5c3f'), rule('△', '#fff4dd', '#8a5a00'), rule('출', '#dbe9fb', '#1f4f8a'), rule('X', '#fbe3dc', '#b3402a')]);
   }
   return sh;
 }
@@ -590,58 +627,39 @@ function sendAlert_(emails, topic, title, body) {
     try { MailApp.sendEmail({ to: emails.join(','), subject: title, body: body }); ok++; } catch (e) { errs.push('메일: ' + e); }
   }
   if (topic) {
-    // 구글 서버는 여럿이 함께 써서 ntfy가 '너무 많음(429)'으로 막을 수 있어요.
-    // 스크립트 속성 NTFY_TOKEN(ntfy 무료 계정의 액세스 토큰)이 있으면 그 계정 한도로 보내고, 429면 한 번 더 시도해요.
+    // 구글 서버는 여럿이 함께 써서 ntfy가 '너무 많음(429)'으로 막을 때가 있어요.
+    // 그래서 ① 잠깐씩 쉬며 4번까지 보내 보고 ② 그래도 막히면 ntfy의 '메일로 푸시 보내기'(ntfy-채널@ntfy.sh)로 보내요.
     var token = String(PropertiesService.getScriptProperties().getProperty('NTFY_TOKEN') || '').trim();
     var opt = { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       payload: JSON.stringify({ topic: topic, title: title, message: body.slice(0, 1000), tags: ['church'] }) };
     if (token) opt.headers = { Authorization: 'Bearer ' + token };
-    try {
-      var res = UrlFetchApp.fetch('https://ntfy.sh', opt);
-      if (res.getResponseCode() === 429) { Utilities.sleep(3000); res = UrlFetchApp.fetch('https://ntfy.sh', opt); }
-      if (res.getResponseCode() === 200) ok++; else errs.push('푸시: 코드 ' + res.getResponseCode());
-    } catch (e) { errs.push('푸시: ' + e); }
+    var code = 0, waits = [0, 4000, 8000, 15000];
+    for (var i = 0; i < waits.length && code !== 200; i++) {
+      if (waits[i]) Utilities.sleep(waits[i]);
+      try { code = UrlFetchApp.fetch('https://ntfy.sh', opt).getResponseCode(); } catch (e) { code = -1; }
+      if (code !== 429 && code !== -1 && code !== 200) break;
+    }
+    if (code === 200) ok++;
+    else {
+      try { MailApp.sendEmail({ to: 'ntfy-' + topic + '@ntfy.sh', subject: title, body: body.slice(0, 1000) }); ok++; }
+      catch (e) { errs.push('푸시: 코드 ' + code + ', 메일로 보내기도 실패: ' + e); }
+    }
   }
   if (errs.length) console.error('알림 일부 실패: ' + errs.join(' / '));
   return { sent: ok, failed: errs.length > 0 && ok === 0 };
 }
 
 /* 1) 새가족 등록 → 회계팀 (헌금봉투)
- * 이미 알린 사람은 NOTIFIED_IDS 에 기록해서 다시 보내지 않아요.
- * 처음 켤 때 있던 사람, 받을 곳이 아직 없을 때 등록된 사람은 보내지 않고 기록만 해요(나중에 한꺼번에 몰려 가지 않게).
- * 보내기가 모두 실패하면 기록하지 않아서 다음 업데이트 때 다시 보내요.
+ * 앱의 새가족팀 화면이 등록 순간 새가족팀 휴대폰에서 바로 ntfy로 보내요(구글 서버에서 보내면 막힐 때가 있어서).
+ * 여기서는 받을 채널 이름(스크립트 속성 NEWCOMER_PUSH)을 Firebase config/notify 에 넣어 두기만 해요.
  */
-function newcomersToNotify(members, notified) {
-  return members.filter(function (m) { return m.isNew && !notified[m.id]; });
+// 회계팀 채널 이름을 Firebase config/notify 에 넣어 둬요 (앱의 새가족팀 화면이 읽어서 바로 보냄)
+function syncNotifyConfig_(p, auth) {
+  var topic = String(p.NEWCOMER_PUSH || '').trim();
+  var url = docsUrl_(p) + '/config/notify';
+  UrlFetchApp.fetch(url, { method: 'patch', contentType: 'application/json', headers: auth.headers, muteHttpExceptions: true,
+    payload: JSON.stringify({ fields: { newcomerTopic: { stringValue: topic } } }) });
 }
-function newcomerMessage(m, label) {
-  label = label || m.name;
-  return {
-    title: '[청년부] 새가족 ' + label + '님 헌금봉투를 준비해 주세요',
-    body: '새가족이 등록됐어요. 헌금봉투를 만들어 주세요.\n\n이름: ' + label +
-      (m.birthYear ? '\n출생연도: ' + m.birthYear : '') + '\n처음 온 날: ' + (m.firstVisit || '') + '\n등록한 날: ' + (m.registeredAt || '')
-  };
-}
-function notifyNewcomers_(p, members) {
-  var props = PropertiesService.getScriptProperties();
-  var emails = splitList_(p.NEWCOMER_EMAILS), topic = String(p.NEWCOMER_PUSH || '').trim();
-  var raw = props.getProperty('NOTIFIED_IDS');
-  var notified = {};
-  (raw ? raw.split(',') : []).forEach(function (id) { if (id) notified[id] = true; });
-  var todo = newcomersToNotify(members, notified);
-  if (!todo.length) return 0;
-  var sent = 0, failed = {};
-  if (raw !== null && (emails.length || topic)) {
-    todo.forEach(function (m) {
-      var msg = newcomerMessage(m, nameLabel(m, dupNameSet(members))), r = sendAlert_(emails, topic, msg.title, msg.body);
-      if (r.failed) failed[m.id] = true; else sent++;
-    });
-  }
-  todo.forEach(function (m) { if (!failed[m.id]) notified[m.id] = true; });
-  props.setProperty('NOTIFIED_IDS', Object.keys(notified).join(','));
-  return sent;
-}
-
 /* 2) 주일 15:30 무렵 출석 미제출 → 목자들
  * 'turnOnSundayReminder'가 매주 일요일 15시 30분 무렵(구글 사정으로 ±15분) 실행되게 예약해요.
  */
@@ -659,8 +677,8 @@ function remindUnsubmitted() {
   if (!miss.length) return 'all-done';
   var names = miss.map(function (g) { return g.name + (g.leader ? '(' + g.leader + ')' : ''); });
   sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(),
-    '[청년부] 오늘 출석체크를 부탁드려요 (' + miss.length + '개 목장)',
-    '아직 출석을 내지 않은 목장: ' + names.join(', ') + '\n앱에서 출석체크 → 제출해 주세요.\nhttps://jueunjeong0410-jpg.github.io/attendance/#check');
+    '[청년부] 출석체크 미제출 ' + miss.length + '개 목장',
+    '출석체크 후 제출버튼까지 눌러주세요!\n\n아직 안 낸 목장: ' + names.join(', ') + '\nhttps://jueunjeong0410-jpg.github.io/attendance/#check');
   return 'sent ' + miss.length;
 }
 function turnOnSundayReminder() {
@@ -674,8 +692,8 @@ function turnOnSundayReminder() {
 // 설정한 곳으로 시험 알림을 하나씩 보내 봐요 (개인정보 없음)
 function testAlerts() {
   var p = props_();
-  var a = sendAlert_(splitList_(p.NEWCOMER_EMAILS), String(p.NEWCOMER_PUSH || '').trim(), '[청년부] 시험 알림 (회계팀)', '새가족 헌금봉투 알림이 이렇게 와요.');
-  var b = sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(), '[청년부] 시험 알림 (목자)', '주일 출석 미제출 알림이 이렇게 와요.');
+  var a = sendAlert_(splitList_(p.NEWCOMER_EMAILS), String(p.NEWCOMER_PUSH || '').trim(), '[청년부] 시험 알림 (회계팀)', '기쁜 소식! 새가족이 등록했습니다. 헌금봉투를 새로 만들어주세요!\n(시험 알림이에요)');
+  var b = sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(), '[청년부] 시험 알림 (목자)', '출석체크 후 제출버튼까지 눌러주세요!\n(시험 알림이에요)');
   var msg = '회계팀 ' + a.sent + '곳, 목자 ' + b.sent + '곳으로 보냈어요.' + (a.failed || b.failed ? ' (실패가 있어요. 실행 기록의 오류를 확인해 주세요)' : '');
   try { SpreadsheetApp.getActive().toast(msg, '알림'); } catch (e) {}
   return msg;
