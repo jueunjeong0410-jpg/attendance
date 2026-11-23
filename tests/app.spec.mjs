@@ -5,6 +5,7 @@ import { test, expect } from '@playwright/test';
 
 const EDIT_PW = '1234';
 const VIEW_PW = '0000';
+const NF_PW = '5678';   // 체험 모드 전용 새가족팀 비밀번호
 
 async function login(page, pw) {
   await page.fill('#pw', pw);
@@ -183,10 +184,10 @@ test('저장하면 구글 시트에 업데이트 신호를 보내고, 연달아 
   expect(Number(await (await request.get('/__pings')).text())).toBeGreaterThanOrEqual(2);
 });
 
-test('편집 권한이면 구글 시트 버튼이 새 탭 링크로 열린다', async ({ page }) => {
+test('구글 시트 버튼은 새가족팀에게만 보이고 새 탭으로 열린다', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전에는 안 보임
-  await login(page, EDIT_PW);
+  await expect(page.locator('#sheetLink')).toBeHidden();           // 로그인 전
+  await login(page, NF_PW);
   const link = page.locator('#sheetLink');
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute('href', /docs\.google\.com\/spreadsheets\/d\//);
@@ -194,23 +195,65 @@ test('편집 권한이면 구글 시트 버튼이 새 탭 링크로 열린다', 
   await expect(link).toContainText('구글 시트');
 });
 
-test('보기 권한이면 구글 시트로 못 넘어가고 안내가 3초 뒤 사라진다', async ({ page, context }) => {
+for (const [who, pw] of [['목자', EDIT_PW], ['보기', VIEW_PW]]) {
+  test(`${who} 권한에는 구글 시트 버튼도 링크 주소도 없다`, async ({ page }) => {
+    await page.goto('/');
+    await login(page, pw);
+    await expect(page.locator('#v-dashboard')).toBeVisible();
+    const link = page.locator('#sheetLink');
+    await expect(link).toBeHidden();
+    expect(await link.getAttribute('href')).toBeNull();
+  });
+}
+
+test('새가족팀은 목장 출석 체크·명단 수정을 못 한다', async ({ page }) => {
   await page.goto('/');
-  await login(page, VIEW_PW);
-  const link = page.locator('#sheetLink');
-  await expect(link).toBeVisible();
-  expect(await link.getAttribute('href')).toBeNull();               // 주소 자체가 없음(길게 눌러 복사도 불가)
-  let opened = false; context.on('page', () => { opened = true });
-  await link.click();
-  const t = page.locator('#toast');
-  await expect(t).toHaveText('뷰어 기능에선 지원하지 않는 기능입니다.');
-  await expect(t).toHaveClass(/on/);
-  await page.waitForTimeout(2500);
-  await expect(t).toHaveClass(/on/);                                 // 2.5초엔 아직 보임
-  await page.waitForTimeout(800);
-  await expect(t).not.toHaveClass(/on/);                             // 3초 뒤 사라짐
-  expect(opened).toBe(false);
-  expect(page.url()).not.toContain('docs.google.com');
+  await login(page, NF_PW);
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('새가족팀으로 들어오셨어요');
+  await expect(page.locator('#make13')).toHaveCount(0);
+  await expect(page.locator('#edit')).toHaveCount(0);
+});
+
+test('연도가 바뀌면 목장을 새로 만들고, 지난 연도 목장·기록은 그대로 남는다', async ({ page }) => {
+  await setupGroups(page);                                   // 올해(2026) 목장 13개
+  await fillRoster(page, ['가목자', '나하늘']);
+  await page.click('.m[data-n="나하늘"]');
+  await page.click('#submit');
+  await expect(page.locator('.gp[aria-pressed=true]')).toContainText('제출됨');
+  const sunday = await page.inputValue('#date');
+
+  // 2027년 주일로 가면 2026년 목장은 안 보이고 새로 만들 수 있다
+  await page.fill('#date', '2027-01-03');
+  await expect(page.locator('#make13')).toBeVisible();
+  await page.click('#make13');
+  await expect(page.locator('.gp')).toHaveCount(13);
+  await page.click('#edit');
+  await page.fill('#en', '테스트 목장');                     // 2027년 목장 이름을 같은 이름으로 바꿔도
+  await page.fill('#em', '새목원');
+  await page.click('#eSave');
+
+  // 2026년으로 돌아가면 예전 명단·기록이 그대로
+  await page.fill('#date', sunday);
+  await page.goto('/#dashboard');
+  await expect(page.locator('#rows .row')).toHaveCount(13);
+  await page.click('[data-open]');
+  await expect(page.locator('.detail')).toContainText('나하늘');
+  await expect(page.locator('.detail')).not.toContainText('새목원');
+  const demo = await page.evaluate(() => JSON.parse(localStorage.getItem('demo')));
+  const ids = Object.keys(demo.groups);
+  expect(ids.filter(i => i.startsWith('2027_')).length).toBe(13);  // 새해 목장은 따로 저장
+  expect(ids.filter(i => /^g\d+$/.test(i) || i.startsWith('2026_')).length).toBe(13);
+});
+
+test('지난 연도는 출석·명단을 고칠 수 없다 (보기만)', async ({ page }) => {
+  await page.goto('/');
+  await login(page, EDIT_PW);
+  await page.fill('#date', '2025-11-30');
+  await page.goto('/#check');
+  await expect(page.locator('#checkBody')).toContainText('지난 연도');
+  await expect(page.locator('#make13')).toHaveCount(0);
+  await expect(page.locator('#submit')).toHaveCount(0);
 });
 
 test('출석체크에 제출자 칸이 없다', async ({ page }) => {
