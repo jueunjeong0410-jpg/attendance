@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { makeSpreadsheet, makeAppsScriptGlobals } from './fake-sheets.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const code = fs.readFileSync(path.join(here, '..', 'sheets', 'attendance-sheet.gs'), 'utf8');
+// Apps Script 프로젝트에는 시트 스크립트 + report(앱의 report.js와 같은 내용) 두 파일이 함께 있어요
+const code = fs.readFileSync(path.join(here, '..', 'report.js'), 'utf8') + '\n' + fs.readFileSync(path.join(here, '..', 'sheets', 'attendance-sheet.gs'), 'utf8');
 
 const groups = [
   { id: 'g01', name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }, { name: '다소망' }] },
@@ -59,10 +60,10 @@ test('시트 쓰기: 두 번 연달아 업데이트해도 병합이 깨지지 �
   expect(sh.merges.filter(m => m.c === 1 && m.r >= 5).length).toBe(2);
 });
 
-test('연도별 시트: 예전 "출석현황" 시트는 올해 시트로 이름이 바뀌고, 최신 연도가 맨 앞', () => {
+test('연도별 시트: 예전 "출석현황" 시트는 올해 시트로 이름이 바뀌고, 분기별통계 다음에 최신 연도부터', () => {
   const ss = makeSpreadsheet(['출석현황']);
   run(ss);
-  expect(ss.sheets.map(s => s.name)).toEqual(['2026 출석현황', '2025 출석현황']);
+  expect(ss.sheets.map(s => s.name)).toEqual(['분기별통계', '2026 출석현황', '2025 출석현황']);
   expect(ss.getSheetByName('출석현황')).toBeNull();
   const y25 = ss.getSheetByName('2025 출석현황');
   expect(y25.value(1, 1)).toBe('2025년 청년부 출석');
@@ -157,4 +158,26 @@ test('명단 가져오기: 스크립트 주인의 구글 로그인이 아니면(
   vm.createContext(ctx); vm.runInContext(code, ctx);
   expect(() => ctx.importRoster()).toThrow(/구글 로그인으로만/);
   expect(ctx.commits.length).toBe(0);
+});
+
+/* ---------- 분기별 통계 탭 ---------- */
+test('분기별통계 탭: 언제나 맨 앞 탭이고, 분기마다 한 줄(최신 분기부터), 연도별 목장 출석률 표', () => {
+  const ss = makeSpreadsheet(['전체인원', '분기별통계']);
+  const gs = [{ id: 'g01', name: '가목장', order: 1, members: [{ name: '가목자' }, { name: '나하늘' }] }];
+  const rs = [
+    { date: '2026-09-27', gid: 'g01', groupName: '가목장', present: ['가목자'], worship: [], absent: ['나하늘'], guests: [] },
+    { date: '2026-11-15', gid: 'g01', groupName: '가목장', present: ['가목자'], worship: ['나하늘'], absent: [], guests: ['가짜손님'] },
+  ];
+  run(ss, rs, { groups: gs });
+  expect(ss.sheets[0].name).toBe('분기별통계');
+  expect(ss.sheets[1].name).toBe('2026 출석현황');
+  const sh = ss.sheets[0];
+  const row = (r) => Array.from({ length: 13 }, (_, c) => sh.value(r, c + 1));
+  expect(row(3)[0]).toBe('분기');
+  expect(row(4).slice(0, 4)).toEqual(['2026년 4분기', '10/01 ~ 12/31', 1, 2]);   // 공식 출석 2명
+  expect(row(4)[7]).toBe(1);                                                    // 방문자 합계
+  expect(row(5).slice(0, 4)).toEqual(['2026년 3분기', '07/01 ~ 09/30', 1, 1]);
+  expect(sh.value(7, 1)).toBe('2026년 목장별 출석률(%)');
+  expect([sh.value(8, 1), sh.value(8, 4), sh.value(8, 5)]).toEqual(['가목장', 50, 100]);  // 3분기 50%, 4분기 100%
+  expect(sh.frozenRows).toBe(3);
 });

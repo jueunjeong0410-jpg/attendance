@@ -14,7 +14,9 @@
  *   그래서 이 스크립트 주인 = Firebase 프로젝트 주인이어야 하고, appsscript.json에 datastore 권한이 있어야 해요.
  *   (예전 방식) 구글 로그인이 안 되면 스크립트 속성의 FIREBASE_API_KEY·VIEWER_EMAIL·VIEWER_PASSWORD로 로그인해요.
  *
- * 주의: 연도별 출석현황 시트는 업데이트할 때마다 새로 그려져요. 이 시트에 직접 적은 내용은 지워져요.
+ * 분기별 통계: '분기별통계' 탭을 맨 앞에 두고 분기마다 한 줄씩 채워요. 계산은 'report' 파일(앱의 report.js와 같은 내용)에 있어요.
+ *
+ * 주의: 연도별 출석현황 시트와 분기별통계 탭은 업데이트할 때마다 새로 그려져요. 직접 적은 내용은 지워져요.
  */
 
 var SHEET_NAME = '출석현황';   // 연도별 시트 이름: '2026 출석현황' 처럼 앞에 연도가 붙어요
@@ -45,18 +47,88 @@ function updateAttendanceSheet() {
   var token = auth_(p);
   var groups = listDocs_(p, token, 'groups');
   var records = listDocs_(p, token, 'attendance');
+  var welcomes = listDocs_(p, token, 'welcome');
+  var members = listDocs_(p, token, 'members');
   var thisYear = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy'));
   var ss = SpreadsheetApp.getActive();
   // 예전 '출석현황' 시트가 있으면 지우지 않고 올해 시트 이름으로 바꿔 써요
   var old = ss.getSheetByName(SHEET_NAME);
   if (old && !ss.getSheetByName(sheetNameForYear(thisYear))) old.setName(sheetNameForYear(thisYear));
+  // 분기별 통계는 언제나 맨 앞 탭
+  var qs = writeQuarterSheet_(buildQuarterGrid(groups, records, welcomes, members));
+  ss.setActiveSheet(qs); ss.moveActiveSheet(1);
   yearsToWrite(records, thisYear).forEach(function (y, i) {
     var yearRecords = records.filter(function (r) { return String(r.date || '').slice(0, 4) === String(y); });
     // 목장은 해마다 새로 짜요. 그 해 목장만 쓰고, 다른 해 목장 이름은 기록에 남은 이름 그대로 둬요
     var yearGroups = groups.filter(function (g) { return groupYear(g) === y; });
     var sh = writeSheet_(buildGrid(yearGroups, yearRecords, y + '년 청년부 출석'), sheetNameForYear(y));
-    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1);   // 최신 연도가 맨 앞
+    ss.setActiveSheet(sh); ss.moveActiveSheet(Math.min(i + 2, ss.getSheets().length));   // 분기별통계 다음, 최신 연도부터
   });
+}
+
+/* ---------- 분기별 통계 탭 ---------- */
+var QUARTER_SHEET = '분기별통계';
+var Q_HEAD = ['분기', '기간', '주일 수', '평균 예배 출석(공식)', '평균 목장모임', '최고', '최저', '방문자 합계', '주일 평균 방문자', '새가족 등록', '새가족 3회 이상 출석', '목장 명단 인원', '4주 연속 결석'];
+
+// 시트에 쓸 값 만들기 (순수 계산: 테스트 대상)
+function buildQuarterGrid(groups, records, welcomes, members) {
+  var qs = quartersWithData(records, welcomes).reverse();   // 최신 분기부터
+  var stats = qs.map(function (q) { return quarterStats(q, groups, records, welcomes, members); });
+  var rows = [['청년부 분기별 통계', ''], [''], Q_HEAD];
+  var sections = { summaryHead: 3, rateHeads: [], absentHead: 0 };
+  stats.forEach(function (s) {
+    rows.push([s.label, s.from.slice(5).replace('-', '/') + ' ~ ' + s.to.slice(5).replace('-', '/'), s.sundays, s.avgOfficial, s.avgGroup,
+      s.maxOfficial, s.minOfficial, s.guests, s.avgGuests, s.newcomers, s.settled, s.roster, s.absent4.length]);
+  });
+  if (!stats.length) rows.push(['아직 출석 기록이 없어요']);
+  // 연도별 목장 출석률(%) 표: 목장 × 1~4분기
+  var years = {};
+  stats.forEach(function (s) { years[s.q.slice(0, 4)] = true; });
+  Object.keys(years).sort().reverse().forEach(function (y) {
+    rows.push(['']);
+    sections.rateHeads.push(rows.length + 1);
+    rows.push([y + '년 목장별 출석률(%)', '1분기', '2분기', '3분기', '4분기']);
+    var byQ = {};
+    stats.forEach(function (s) { if (s.q.slice(0, 4) === y) byQ[s.q.slice(-1)] = s; });
+    var names = [], seen = {};
+    [1, 2, 3, 4].forEach(function (n) { (byQ[n] ? byQ[n].groupRates : []).forEach(function (g) { if (!seen[g.gid]) { seen[g.gid] = true; names.push(g); } }); });
+    names.forEach(function (g) {
+      rows.push([g.name].concat([1, 2, 3, 4].map(function (n) {
+        var r = byQ[n] && byQ[n].groupRates.filter(function (x) { return x.gid === g.gid; })[0];
+        return r && r.rate != null ? r.rate : '';
+      })));
+    });
+  });
+  // 최근 분기 4주 연속 결석 명단
+  if (stats.length && stats[0].absent4.length) {
+    rows.push(['']);
+    sections.absentHead = rows.length + 1;
+    rows.push([stats[0].label + ' 4주 연속 결석', '목장']);
+    stats[0].absent4.forEach(function (a) { rows.push([a.name, a.group]); });
+  }
+  var width = Q_HEAD.length;
+  rows = rows.map(function (r) { var x = r.slice(); while (x.length < width) x.push(''); return x; });
+  return { values: rows, width: width, sections: sections, quarters: stats.length };
+}
+
+function writeQuarterSheet_(grid) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(QUARTER_SHEET) || ss.insertSheet(QUARTER_SHEET);
+  sh.clear(); sh.clearConditionalFormatRules();
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  sh.setFrozenRows(0); sh.setFrozenColumns(0);
+  var v = grid.values;
+  if (sh.getMaxColumns() < grid.width) sh.insertColumnsAfter(sh.getMaxColumns(), grid.width - sh.getMaxColumns());
+  sh.getRange(1, 1, v.length, grid.width).setValues(v);
+  sh.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  sh.getRange(1, 2).setValue('업데이트 ' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'M/d HH:mm')).setFontColor('#5b6b62');
+  sh.getRange(grid.sections.summaryHead, 1, 1, grid.width).setFontWeight('bold').setBackground('#1f5c3f').setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
+  grid.sections.rateHeads.forEach(function (r) { sh.getRange(r, 1, 1, 5).setFontWeight('bold').setBackground('#cfe6d6').setFontColor('#1f5c3f'); });
+  if (grid.sections.absentHead) sh.getRange(grid.sections.absentHead, 1, 1, 2).setFontWeight('bold').setBackground('#fbe3dc').setFontColor('#b3402a');
+  sh.setFrozenRows(grid.sections.summaryHead);
+  sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 110);
+  sh.setColumnWidths(3, grid.width - 2, 92);
+  return sh;
 }
 
 /* ---------- 연도별 시트 ---------- */
