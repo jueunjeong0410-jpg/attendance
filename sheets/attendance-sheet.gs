@@ -126,7 +126,21 @@ function buildQuarterGrid(groups, records, welcomes, members) {
   }
   var width = Q_HEAD.length;
   rows = rows.map(function (r) { var x = r.slice(); while (x.length < width) x.push(''); return x; });
-  return { values: rows, width: width, sections: sections, quarters: stats.length };
+  // 그래프용 표 (최신 분기): 주별 출석 추이, 목장별 평균 출석률(60% 미만은 따로 → 빨간 막대)
+  var chart = null;
+  if (stats.length && stats[0].weekly.length) {
+    var s0 = stats[0];
+    chart = {
+      label: s0.label,
+      weekly: [['주일', '예배 출석(공식)', '목장모임']].concat(s0.weekly.map(function (w) {
+        return [Number(w.date.slice(5, 7)) + '/' + Number(w.date.slice(8, 10)), w.official, w.group];
+      })),
+      rates: [['목장', '60% 이상', '60% 미만']].concat(s0.groupRates.filter(function (g) { return g.rate != null; })
+        .sort(function (a, b) { return b.rate - a.rate; })
+        .map(function (g) { return [g.name, g.rate >= 60 ? g.rate : '', g.rate < 60 ? g.rate : '']; }))
+    };
+  }
+  return { values: rows, width: width, sections: sections, quarters: stats.length, chart: chart };
 }
 
 function writeQuarterSheet_(grid) {
@@ -146,7 +160,37 @@ function writeQuarterSheet_(grid) {
   sh.setFrozenRows(grid.sections.summaryHead);
   sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 110);
   sh.setColumnWidths(3, grid.width - 2, 92);
+  drawQuarterCharts_(sh, grid.chart);
   return sh;
+}
+
+// 그래프: 표 오른쪽(O열)에 '주별 출석 추이'(선)와 '목장별 평균 출석률'(막대). 그래프 재료는 X열부터 적어 둬요.
+var CHART_DATA_COL = 24;   // X열
+function drawQuarterCharts_(sh, c) {
+  sh.getCharts().forEach(function (x) { sh.removeChart(x); });
+  if (!c) return;
+  var need = CHART_DATA_COL + 6;
+  if (sh.getMaxColumns() < need) sh.insertColumnsAfter(sh.getMaxColumns(), need - sh.getMaxColumns());
+  var wk = sh.getRange(1, CHART_DATA_COL, c.weekly.length, 3).setValues(c.weekly);
+  sh.getRange(1, CHART_DATA_COL).setValue('주일');
+  var rt = c.rates.length > 1 ? sh.getRange(1, CHART_DATA_COL + 4, c.rates.length, 3).setValues(c.rates) : null;
+  sh.getRange(1, CHART_DATA_COL, 1, 7).setFontWeight('bold').setFontColor('#5b6b62');
+  sh.insertChart(sh.newChart().setChartType(Charts.ChartType.LINE)
+    .addRange(sh.getRange(1, CHART_DATA_COL, c.weekly.length, 3))
+    .setNumHeaders(1).setPosition(3, 15, 0, 0)
+    .setOption('title', c.label + ' 주별 출석 추이').setOption('width', 640).setOption('height', 320)
+    .setOption('legend', { position: 'top' }).setOption('pointSize', 7).setOption('curveType', 'function')
+    .setOption('vAxis', { minValue: 0 })
+    .setOption('series', { 0: { color: '#2a78d6', lineWidth: 3 }, 1: { color: '#eb6834', lineWidth: 2, lineDashStyle: [6, 4] } })
+    .build());
+  if (rt) sh.insertChart(sh.newChart().setChartType(Charts.ChartType.BAR)
+    .addRange(sh.getRange(1, CHART_DATA_COL + 4, c.rates.length, 3))
+    .setNumHeaders(1).setPosition(21, 15, 0, 0)
+    .setOption('title', c.label + ' 목장별 평균 출석률 (%)').setOption('width', 640).setOption('height', Math.max(260, 40 + 28 * (c.rates.length - 1)))
+    .setOption('isStacked', true).setOption('legend', { position: 'top' })
+    .setOption('hAxis', { minValue: 0, maxValue: 100 })
+    .setOption('series', { 0: { color: '#2a78d6' }, 1: { color: '#e34948' } })
+    .build());
 }
 
 /* ---------- 연도별 시트 ---------- */
@@ -546,9 +590,15 @@ function sendAlert_(emails, topic, title, body) {
     try { MailApp.sendEmail({ to: emails.join(','), subject: title, body: body }); ok++; } catch (e) { errs.push('메일: ' + e); }
   }
   if (topic) {
+    // 구글 서버는 여럿이 함께 써서 ntfy가 '너무 많음(429)'으로 막을 수 있어요.
+    // 스크립트 속성 NTFY_TOKEN(ntfy 무료 계정의 액세스 토큰)이 있으면 그 계정 한도로 보내고, 429면 한 번 더 시도해요.
+    var token = String(PropertiesService.getScriptProperties().getProperty('NTFY_TOKEN') || '').trim();
+    var opt = { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({ topic: topic, title: title, message: body.slice(0, 1000), tags: ['church'] }) };
+    if (token) opt.headers = { Authorization: 'Bearer ' + token };
     try {
-      var res = UrlFetchApp.fetch('https://ntfy.sh', { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-        payload: JSON.stringify({ topic: topic, title: title, message: body.slice(0, 1000), tags: ['church'] }) });
+      var res = UrlFetchApp.fetch('https://ntfy.sh', opt);
+      if (res.getResponseCode() === 429) { Utilities.sleep(3000); res = UrlFetchApp.fetch('https://ntfy.sh', opt); }
       if (res.getResponseCode() === 200) ok++; else errs.push('푸시: 코드 ' + res.getResponseCode());
     } catch (e) { errs.push('푸시: ' + e); }
   }
@@ -626,7 +676,7 @@ function testAlerts() {
   var p = props_();
   var a = sendAlert_(splitList_(p.NEWCOMER_EMAILS), String(p.NEWCOMER_PUSH || '').trim(), '[청년부] 시험 알림 (회계팀)', '새가족 헌금봉투 알림이 이렇게 와요.');
   var b = sendAlert_(splitList_(p.REMIND_EMAILS), String(p.REMIND_PUSH || '').trim(), '[청년부] 시험 알림 (목자)', '주일 출석 미제출 알림이 이렇게 와요.');
-  var msg = '회계팀 ' + a.sent + '곳, 목자 ' + b.sent + '곳으로 보냈어요.';
+  var msg = '회계팀 ' + a.sent + '곳, 목자 ' + b.sent + '곳으로 보냈어요.' + (a.failed || b.failed ? ' (실패가 있어요. 실행 기록의 오류를 확인해 주세요)' : '');
   try { SpreadsheetApp.getActive().toast(msg, '알림'); } catch (e) {}
   return msg;
 }

@@ -324,3 +324,41 @@ test('동명이인 표시: 시트 새가족 탭·알림에 생년 두 자리 (�
   expect([sh.value(3, 3), sh.value(4, 3)]).toEqual(['김가은05', '김가은01']);
   expect(c.pushes.map(p => p.title)).toEqual(['[청년부] 새가족 김가은05님 헌금봉투를 준비해 주세요']);
 });
+
+test('분기별통계 그래프: 최신 분기의 주별 출석 추이(선)와 목장별 출석률(막대, 60% 미만은 빨간 계열), 업데이트해도 그래프는 2개만', () => {
+  const ss = makeSpreadsheet();
+  const gs = [{ id: 'g01', name: '가목장', order: 1, members: [{ name: '가' }, { name: '나' }] }, { id: 'g02', name: '나목장', order: 2, members: [{ name: '다' }, { name: '라' }, { name: '마' }] }];
+  const rs = [
+    { date: '2026-11-15', gid: 'g01', present: ['가', '나'], worship: [], absent: [], guests: [] },
+    { date: '2026-11-15', gid: 'g02', present: ['다'], worship: [], absent: ['라', '마'], guests: [] },
+    { date: '2026-11-22', gid: 'g01', present: ['가'], worship: ['나'], absent: [], guests: [] },
+  ];
+  run(ss, rs, { groups: gs });
+  run(ss, rs, { groups: gs });                                                   // 두 번 업데이트해도
+  const sh = ss.getSheetByName('분기별통계');
+  expect(sh.charts.length).toBe(2);
+  const [line, bar] = sh.charts;
+  expect(line.type).toBe('LINE');
+  expect(line.opts.title).toBe('2026년 4분기 주별 출석 추이');
+  expect(line.pos).toEqual([3, 15]);
+  expect(bar.type).toBe('BAR');
+  expect(bar.opts.isStacked).toBe(true);
+  const col = (c, r0, n) => Array.from({ length: n }, (_, i) => sh.value(r0 + i, c));
+  expect(col(24, 2, 2)).toEqual(['11/15', '11/22']);                              // 주일
+  expect(col(25, 2, 2)).toEqual([3, 2]);                                         // 공식 출석
+  expect(col(26, 2, 2)).toEqual([3, 1]);                                         // 목장모임(O)
+  expect(col(28, 2, 2)).toEqual(['가목장', '나목장']);                            // 출석률 높은 순
+  expect([sh.value(2, 29), sh.value(2, 30)]).toEqual([100, '']);                  // 100% → 파란 막대
+  expect([sh.value(3, 29), sh.value(3, 30)]).toEqual(['', 33]);                   // 33% → 빨간 막대
+});
+
+test('푸시: ntfy가 429(너무 많음)면 한 번 더 보내고, NTFY_TOKEN이 있으면 그 계정으로 보낸다', () => {
+  const props = { NEWCOMER_PUSH: 'fake-topic', REMIND_PUSH: 'fake-topic2', NTFY_TOKEN: 'tk_fake' };
+  const c = ctxFor({ props });
+  c.ntfy429 = 1;
+  expect(c.testAlerts()).toBe('회계팀 1곳, 목자 1곳으로 보냈어요.');
+  expect(c.ntfyCalls).toBe(3);                                                  // 첫 번째는 429 → 다시 1번 + 두 번째 1번
+  expect(c.pushes.every(p => p.auth === 'Bearer tk_fake')).toBe(true);
+  c.ntfy429 = 2;
+  expect(c.testAlerts()).toContain('실패가 있어요');                            // 두 번 다 429면 실패로 알림
+});
