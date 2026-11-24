@@ -30,6 +30,12 @@ function makeSheet(name) {
       sh.frozenCols = n;
     },
     getRange(r, c, nr = 1, nc = 1) { return makeRange(sh, r, c, nr, nc); },
+    charts: [],
+    getCharts: () => sh.charts.slice(),
+    removeChart: (x) => { sh.charts = sh.charts.filter(y => y !== x); },
+    insertChart: (x) => { sh.charts.push(x); },
+    newChart() { const spec = { opts: {}, ranges: [] }; const b = { setChartType: (t) => { spec.type = t; return b; }, addRange: (r) => { spec.ranges.push(r.where); return b; },
+      setNumHeaders: () => b, setPosition: (r, c) => { spec.pos = [r, c]; return b; }, setOption: (k, v) => { spec.opts[k] = v; return b; }, build: () => spec }; return b; },
     value(r, c) { return sh.cells[r + ',' + c]; },
   };
   return sh;
@@ -39,6 +45,7 @@ function makeRange(sh, r, c, nr, nc) {
   const inside = (m) => m.r >= r && m.c >= c && m.r + m.nr <= r + nr && m.c + m.nc <= c + nc;
   const overlaps = (m) => !(m.r + m.nr <= r || r + nr <= m.r || m.c + m.nc <= c || c + nc <= m.c);
   const rg = {
+    where: { r, c, nr, nc },
     setValues(v) { v.forEach((row, i) => row.forEach((x, j) => { sh.cells[(r + i) + ',' + (c + j)] = x; })); return chain(rg); },
     setValue(x) { sh.cells[r + ',' + c] = x; return chain(rg); },
     breakApart() { sh.merges = sh.merges.filter(m => !overlaps(m)); return chain(rg); },
@@ -87,7 +94,7 @@ export function makeAppsScriptGlobals({ ss, groups = [], records = [], collectio
   const data = { groups, attendance: records, members: [], contacts: [], welcome: [], ...collections };
   const calls = [];   // 테스트에서 어떤 요청을 보냈는지 확인용
   const g = {
-    calls, commits: [], mails: [], pushes: [], props, triggers: [],
+    calls, commits: [], mails: [], pushes: [], props, triggers: [], ntfy429: 0,
     SpreadsheetApp: {
       getActive: () => Object.assign(ss, { getUrl: () => 'https://docs.google.com/spreadsheets/d/fake' }),
       newConditionalFormatRule: () => chain({ build: () => ({}) }),
@@ -99,6 +106,7 @@ export function makeAppsScriptGlobals({ ss, groups = [], records = [], collectio
       getProperty: (k) => (k in props ? props[k] : null),
       setProperty: (k, v) => { props[k] = v; },
     }) },
+    Charts: { ChartType: { LINE: 'LINE', BAR: 'BAR' } },
     MailApp: { sendEmail: (m) => { if (mailFail) throw new Error('메일 실패'); g.mails.push(m); } },
     ScriptApp: { getOAuthToken: () => (oauth ? 'fake-oauth' : null), WeekDay: { SUNDAY: 'SUNDAY' }, getProjectTriggers: () => g.triggers, deleteTrigger: (t) => { g.triggers = g.triggers.filter(x => x !== t); },
       newTrigger: (fn) => { const t = { fn, spec: [] , getHandlerFunction: () => fn }; const b = new Proxy({}, { get: (_o, k) => (k === 'create' ? () => { g.triggers.push(t); return t; } : (...a) => { t.spec.push([k, ...a]); return b; }) }); return b; } },
@@ -108,13 +116,16 @@ export function makeAppsScriptGlobals({ ss, groups = [], records = [], collectio
         const ok = (body) => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify(body) });
         if (url.includes('signInWithPassword')) return password ? ok({ idToken: 'fake-token' }) : { getResponseCode: () => 400, getContentText: () => '{}' };
         if (opt.headers && opt.headers.Authorization === 'Bearer fake-oauth' && !oauth) return { getResponseCode: () => 403, getContentText: () => '{}' };
-        if (url === 'https://ntfy.sh') { g.pushes.push(JSON.parse(opt.payload)); return ok({ id: 'x' }); }
+        if (url === 'https://ntfy.sh') {
+          g.ntfyCalls = (g.ntfyCalls || 0) + 1;
+          if (g.ntfy429 > 0) { g.ntfy429--; return { getResponseCode: () => 429, getContentText: () => '{}' }; }
+          g.pushes.push({ ...JSON.parse(opt.payload), auth: opt.headers && opt.headers.Authorization }); return ok({ id: 'x' }); }
         if (url.includes(':commit')) { const b = JSON.parse(opt.payload); g.commits.push(b); return ok({ writeResults: b.writes.map(() => ({})) }); }
         const col = (url.match(/documents\/([a-z]+)/) || [])[1];
         return ok({ documents: (data[col] || []).map(doc(col)) });
       },
     },
-    Utilities: { formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : fmt === 'yyyy-MM' ? now.slice(0, 7)
+    Utilities: { sleep() {}, formatDate: (d, _tz, fmt) => (fmt === 'yyyy' ? now.slice(0, 4) : fmt === 'yyyy-MM-dd' ? now : fmt === 'yyyy-MM' ? now.slice(0, 7)
       : fmt === 'u' ? String(new Date(now + 'T12:00:00Z').getUTCDay() || 7) : '11/23 02:00') },
     console: { error() {}, log() {} },
   };

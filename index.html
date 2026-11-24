@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <!-- 보안: 이 페이지가 불러오거나 연결할 수 있는 곳을 Firebase·구글 시트 스크립트·글꼴로만 제한해요 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://script.google.com https://script.googleusercontent.com; frame-src https://youth-attendance-7a450.firebaseapp.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://script.google.com https://script.googleusercontent.com https://ntfy.sh; frame-src https://youth-attendance-7a450.firebaseapp.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>청년부 출석</title>
 <meta name="theme-color" content="#1f5c3f">
@@ -175,6 +175,7 @@ const VIEWER_EMAIL = "viewer@youth.app";   // 보기 계정 (목사님·부장�
 const NEWFAMILY_EMAIL = "newfamily@youth.app";   // 새가족팀 계정 (새가족 출석·등록, 연락처, 구글 시트)
 const LEGACY_YEAR = 2026;   // 연도 표시가 없는 예전 목장은 2026년 목장으로 봐요
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/172_ExrhP-i0CqmUnGhPo06DHBjwO3E8N4OOOdQmOmPg/edit";   // 출석현황 구글 시트
+const NTFY_URL = "https://ntfy.sh";   // 휴대폰 푸시(ntfy). 채널 이름은 코드에 없고 Firebase(새가족팀만 읽기)에 있어요
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbx3RPm4k2HpVWeWjBYOMtNrksZwiryGhPb-ul7iB1HQ-_YgWhDJ101PWJUbHX7kv6Jeng/exec";   // 구글 시트 스크립트의 웹 앱 주소 (비어 있으면 시트 신호를 보내지 않음)
 /* ========================================================================== */
 
@@ -205,6 +206,7 @@ if(!DEMO){
     // 교인 명단(모두 읽기) · 연락처(새가족팀만) · 새가족팀 출석(주일마다 문서 하나)
     onMembers:(cb,err)=>F.onSnapshot(F.collection(fs,'members'),s=>cb(s.docs.map(d=>({...d.data(),id:d.id}))),err),
     getContact:async id=>{const d=await F.getDoc(F.doc(fs,'contacts',id));return d.exists()?d.data():null},
+    getNotify:async()=>{const d=await F.getDoc(F.doc(fs,'config','notify'));return d.exists()?d.data():null},
     addMember:async(id,m,c)=>{const b=F.writeBatch(fs);b.set(F.doc(fs,'members',id),m);b.set(F.doc(fs,'contacts',id),c);await b.commit()},
     setMember:(id,m)=>F.setDoc(F.doc(fs,'members',id),m),
     setContact:(id,c)=>F.setDoc(F.doc(fs,'contacts',id),c),
@@ -229,6 +231,7 @@ if(!DEMO){
     setAtt:async(id,d)=>{D.att[id]=d;emit()},
     onMembers:cb=>sub(()=>cb(Object.entries(D.members).map(([id,m])=>({...m,id})))),
     getContact:async id=>{if(role!=='nf')throw{code:'permission-denied'};return D.contacts[id]||null},
+    getNotify:async()=>{if(role!=='nf')throw{code:'permission-denied'};return (D.config||{}).notify||null},
     addMember:async(id,m,c)=>{if(D.members[id])throw{code:'already-exists'};D.members[id]=m;D.contacts[id]=c;emit()},
     setMember:async(id,m)=>{D.members[id]=m;emit()},
     setContact:async(id,c)=>{D.contacts[id]=c;emit()},
@@ -447,6 +450,20 @@ function drawRecon(){const el=$('#wRecon');if(!el)return;
     ${!R.shepMiss.length&&!R.nfMiss.length&&!R.noGroup.length&&!R.notSubmitted.length&&!R.unlinked.length?'<div class="empty">불일치가 없어요.</div>':''}`;
 }
 
+/* ---------- 새가족 등록 알림 (회계팀 휴대폰 푸시) ----------
+   새가족팀 휴대폰에서 바로 ntfy로 보내요(구글 서버에서 보내면 ntfy가 막을 때가 있어서).
+   받을 채널 이름은 Firebase config/notify 문서에 있고 새가족팀만 읽을 수 있어요. 설정이 없으면 보내지 않아요(null). */
+async function alertNewcomer(label,reg){
+  let cfg;try{cfg=await store.getNotify()}catch(e){return false}
+  const topic=cfg&&cfg.newcomerTopic;if(!topic)return null;
+  const message=`기쁜 소식! 새가족이 등록했습니다. 헌금봉투를 새로 만들어주세요!\n\n이름: ${label}\n등록한 날: ${reg}`;
+  for(let i=0;i<3;i++){
+    try{const r=await fetch(NTFY_URL,{method:'POST',body:JSON.stringify({topic,title:'[청년부] 새가족 등록',message,tags:['tada']})});if(r.ok)return true}catch(e){}
+    await new Promise(r=>setTimeout(r,1500*(i+1)));
+  }
+  return false;
+}
+
 /* ---------- 새가족팀: 이름 검색 출석, 연락처, 새가족 등록 ---------- */
 let wq='',wOpen='',wReg=false;const cCache={};
 const memberIdFor=(name,birth)=>'m_'+birth.replace(/-/g,'')+'_'+name.replace(/[\/\s]+/g,'');   // 시트 가져오기와 같은 규칙
@@ -533,8 +550,10 @@ function drawWReg(){const el=$('#wRegBox');if(!el)return;if(!wReg){el.innerHTML=
     e.target.disabled=true;
     try{await store.addMember(id,{name,birthYear:Number(birth.slice(0,4)),hint:'새가족',status:'active',registeredAt:reg,firstVisit:first,isNew:true},
         {phone,address:$('#rAddr').value.trim(),birth,memo:$('#rMemo').value.trim()});
-      if($('#rChk')?.checked&&recOpen(date))await store.checkIn(date,id,name);   // 한 달 지난 날짜엔 출석 체크 안 함   // 한 달 지난 날짜엔 출석 체크 안 함
-      toast(`${name} 님을 등록했어요`);wReg=false;wq='';renderWelcome()}
+      if($('#rChk')?.checked&&recOpen(date))await store.checkIn(date,id,name);   // 한 달 지난 날짜엔 출석 체크 안 함
+      const label=members.some(m=>m.name===name&&m.id!==id)?name+birth.slice(2,4):name;
+      const sent=await alertNewcomer(label,reg);
+      toast(`${label} 님을 등록했어요`+(sent===false?' · 회계팀 알림은 못 보냈어요(인터넷 확인)':sent?' · 회계팀에 알렸어요':''),3500);wReg=false;wq='';renderWelcome()}
     catch(err){msg.textContent=err?.code==='already-exists'?'이미 등록된 사람이에요':errMsg(err);e.target.disabled=false}};
 }
 
